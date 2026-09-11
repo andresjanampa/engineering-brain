@@ -11,6 +11,7 @@ internal static class MSBuildProjectLoader
     public static async Task<MSBuildLoadResult> LoadAsync(
         ProjectDiscoveryResult discovery,
         string repositoryRoot,
+        IReadOnlyList<string>? includedProjectPaths,
         CancellationToken cancellationToken)
     {
         var comparer = OperatingSystem.IsWindows()
@@ -27,8 +28,12 @@ internal static class MSBuildProjectLoader
             StringComparer.OrdinalIgnoreCase);
         var solutionMembership = new Dictionary<string, IReadOnlyList<string>>(
             StringComparer.OrdinalIgnoreCase);
+        var selectedPaths = includedProjectPaths?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targetProjects = selectedPaths is null
+            ? discovery.Projects
+            : discovery.Projects.Where(project => selectedPaths.Contains(project.RelativePath)).ToArray();
 
-        foreach (var solution in discovery.Solutions)
+        foreach (var solution in selectedPaths is null ? discovery.Solutions : [])
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var workspace = CreateWorkspace();
@@ -74,7 +79,7 @@ internal static class MSBuildProjectLoader
             }
         }
 
-        foreach (var discoveredProject in discovery.Projects.Where(project => !loaded.ContainsKey(project.FullPath)))
+        foreach (var discoveredProject in targetProjects.Where(project => !loaded.ContainsKey(project.FullPath)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var workspace = CreateWorkspace();
@@ -121,7 +126,7 @@ internal static class MSBuildProjectLoader
             }
         }
 
-        foreach (var project in discovery.Projects.Where(project => !loaded.ContainsKey(project.FullPath)))
+        foreach (var project in targetProjects.Where(project => !loaded.ContainsKey(project.FullPath)))
         {
             if (projectDiagnostics[project.RelativePath].Any(diagnostic =>
                     diagnostic.Code == "CSHARP_PROJECT_LOAD_FAILED"))

@@ -23,6 +23,8 @@ public sealed class RepositoryScanPolicy
         {
             [".cs"] = "C#",
             [".csproj"] = "MSBuild",
+            [".props"] = "MSBuild",
+            [".targets"] = "MSBuild",
             [".sln"] = "Solution",
             [".js"] = "JavaScript",
             [".ts"] = "TypeScript",

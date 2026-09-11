@@ -22,6 +22,12 @@ internal sealed class TemporaryRepository : IDisposable
         File.WriteAllText(fullPath, contents);
     }
 
+    public void Delete(string relativePath)
+    {
+        var fullPath = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        File.Delete(fullPath);
+    }
+
     public void WriteSdkProject(string relativePath, string? projectReference = null)
     {
         var reference = projectReference is null

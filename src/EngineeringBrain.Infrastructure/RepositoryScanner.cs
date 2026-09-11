@@ -57,7 +57,8 @@ public sealed class RepositoryScanner : IRepositoryScanner
                     _policy.GetExtension(file.Name),
                     _policy.DetectLanguage(file.Name),
                     file.Length,
-                    hash));
+                    hash,
+                    file.LastWriteTimeUtc));
             }
         }
 

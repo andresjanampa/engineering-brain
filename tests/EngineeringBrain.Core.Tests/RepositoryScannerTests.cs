@@ -11,6 +11,7 @@ public sealed class RepositoryScannerTests
         fixture.Write("src/Feature.cs", "public class Feature { }");
         fixture.Write("web/app.js", "export const value = 1;");
         fixture.Write("database/schema.sql", "select 1;");
+        fixture.Write("Directory.Build.props", "<Project />");
         fixture.Write(".env", "TOKEN=not-a-real-token");
         fixture.Write("appsettings.json", "{ \"ConnectionString\": \"not-real\" }");
         fixture.Write("bin/Ignored.cs", "public class Ignored { }");
@@ -23,6 +24,8 @@ public sealed class RepositoryScannerTests
         Assert.Contains(result.Files, file => file.RelativePath == "web/app.js");
         Assert.Contains(result.Files, file => file.RelativePath == ".env" && file.ContentHash is null);
         Assert.Contains(result.Files, file => file.RelativePath == "appsettings.json" && file.ContentHash is null);
+        Assert.Contains(result.Files, file => file.RelativePath == "Directory.Build.props" && file.ContentHash is not null);
+        Assert.All(result.Files, file => Assert.NotEqual(default, file.LastWriteTimeUtc));
         Assert.DoesNotContain(result.Files, file => file.RelativePath.Contains("Ignored", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(result.Files, file => file.RelativePath.Contains("node_modules", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(1, result.Languages.Single(item => item.Language == "C#").FileCount);

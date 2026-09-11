@@ -6,16 +6,26 @@ namespace EngineeringBrain.Analyzers.CSharp;
 
 public sealed class CSharpAnalyzer : ILanguageAnalyzer
 {
-    public const string AnalyzerVersion = "csharp-project-aware-v2";
+    public const string AnalyzerVersion = "csharp-project-aware-v3";
 
     public string Language => "C#";
+
+    public string Version => AnalyzerVersion;
 
     public async Task<LanguageAnalysisResult> AnalyzeAsync(
         LanguageAnalysisRequest request,
         CancellationToken cancellationToken = default)
     {
         var discovery = CSharpProjectDiscovery.Discover(request);
-        var load = await MSBuildProjectLoader.LoadAsync(discovery, request.RepositoryRoot, cancellationToken);
+        var selectedPaths = request.IncludedProjectPaths?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selectedProjects = selectedPaths is null
+            ? discovery.Projects
+            : discovery.Projects.Where(project => selectedPaths.Contains(project.RelativePath)).ToArray();
+        var load = await MSBuildProjectLoader.LoadAsync(
+            discovery,
+            request.RepositoryRoot,
+            request.IncludedProjectPaths,
+            cancellationToken);
         var diagnostics = discovery.Diagnostics.Concat(load.Diagnostics).ToList();
         var projectDiagnostics = discovery.Projects.ToDictionary(
             project => project.RelativePath,
@@ -48,8 +58,15 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
                 cancellationToken);
         }
 
-        var entities = projectEntities.Values.Concat(solutionEntities.Values).ToList();
-        var relations = CreateSolutionRelations(load, solutionEntities, projectEntities).ToList();
+        var entities = selectedProjects.Select(project => projectEntities[project.RelativePath]).ToList();
+        if (selectedPaths is null)
+        {
+            entities.AddRange(solutionEntities.Values);
+        }
+
+        var relations = selectedPaths is null
+            ? CreateSolutionRelations(load, solutionEntities, projectEntities).ToList()
+            : [];
         var allowedFiles = request.Files
             .Where(file => file.Extension == ".cs")
             .Select(file => file.RelativePath)
@@ -60,7 +77,8 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
         var semanticExtractions = new List<SemanticExtraction>();
         var projectDocuments = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var context in load.LoadedProjects)
+        foreach (var context in load.LoadedProjects.Where(context =>
+                     selectedPaths is null || selectedPaths.Contains(context.Discovery.RelativePath)))
         {
             var extraction = await CSharpSymbolExtractor.ExtractSemanticAsync(
                 context,
@@ -76,6 +94,8 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
 
         var typeRelations = CSharpSymbolExtractor.ResolveTypeRelations(
             semanticExtractions,
+            load.LoadedProjects,
+            request.ReusableEntities ?? [],
             request.RepositoryRoot,
             cancellationToken);
         relations.AddRange(typeRelations.Relations);
@@ -85,7 +105,7 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
             projectDiagnostics[diagnostic.ProjectPath!].Add(diagnostic);
         }
 
-        var fallbackProjects = discovery.Projects
+        var fallbackProjects = selectedProjects
             .Where(project => !loadedByPath.ContainsKey(project.RelativePath))
             .ToArray();
         foreach (var project in fallbackProjects)
@@ -117,41 +137,45 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
             }
         }
 
-        var ownedPaths = discovery.Projects
-            .SelectMany(project => GetOwnedFiles(
-                request.RepositoryRoot,
-                project,
-                discovery.Projects,
-                request.Files))
-            .Select(file => file.RelativePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var looseFiles = request.Files
-            .Where(file => file.Extension == ".cs" && !ownedPaths.Contains(file.RelativePath))
-            .ToArray();
-        if (looseFiles.Length > 0)
+        if (selectedPaths is null)
         {
-            var looseExtraction = await CSharpSymbolExtractor.ExtractSyntaxAsync(
-                request.RepositoryRoot,
-                looseFiles,
-                null,
-                null,
-                cancellationToken);
-            entities.AddRange(looseExtraction.Entities);
-            relations.AddRange(looseExtraction.Relations);
-            diagnostics.Add(new AnalysisDiagnostic(
-                "CSHARP_LOOSE_FILES_SYNTAX_ONLY",
-                AnalysisDiagnosticSeverity.Information,
-                $"{looseFiles.Length} C# file(s) outside a discovered project were analyzed syntactically.",
-                null));
+            var ownedPaths = discovery.Projects
+                .SelectMany(project => GetOwnedFiles(
+                    request.RepositoryRoot,
+                    project,
+                    discovery.Projects,
+                    request.Files))
+                .Select(file => file.RelativePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var looseFiles = request.Files
+                .Where(file => file.Extension == ".cs" && !ownedPaths.Contains(file.RelativePath))
+                .ToArray();
+            if (looseFiles.Length > 0)
+            {
+                var looseExtraction = await CSharpSymbolExtractor.ExtractSyntaxAsync(
+                    request.RepositoryRoot,
+                    looseFiles,
+                    null,
+                    null,
+                    cancellationToken);
+                entities.AddRange(looseExtraction.Entities);
+                relations.AddRange(looseExtraction.Relations);
+                diagnostics.Add(new AnalysisDiagnostic(
+                    "CSHARP_LOOSE_FILES_SYNTAX_ONLY",
+                    AnalysisDiagnosticSeverity.Information,
+                    $"{looseFiles.Length} C# file(s) outside a discovered project were analyzed syntactically.",
+                    null));
+            }
         }
 
         var projectReferenceResult = CreateProjectReferenceRelations(
             discovery,
+            selectedProjects,
             loadedByPath,
             projectEntities);
         relations.AddRange(projectReferenceResult.Relations);
 
-        var projects = discovery.Projects.Select(project =>
+        var projects = selectedProjects.Select(project =>
         {
             var isSemantic = loadedByPath.ContainsKey(project.RelativePath);
             var references = projectReferenceResult.ReferencesByProject[project.RelativePath];
@@ -225,6 +249,7 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
 
     private static ProjectReferenceResult CreateProjectReferenceRelations(
         ProjectDiscoveryResult discovery,
+        IReadOnlyList<DiscoveredProject> selectedProjects,
         IReadOnlyDictionary<string, LoadedProjectContext> loadedByPath,
         IReadOnlyDictionary<string, CodeEntity> projectEntities)
     {
@@ -235,7 +260,7 @@ public sealed class CSharpAnalyzer : ILanguageAnalyzer
             project => project,
             OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-        foreach (var project in discovery.Projects)
+        foreach (var project in selectedProjects)
         {
             var references = new List<(DiscoveredProject Target, int Line, ResolutionLevel Level)>();
             if (loadedByPath.TryGetValue(project.RelativePath, out var loaded))
