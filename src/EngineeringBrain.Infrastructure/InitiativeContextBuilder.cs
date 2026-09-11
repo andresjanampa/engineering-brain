@@ -32,21 +32,32 @@ public sealed class InitiativeContextBuilder
         ArgumentNullException.ThrowIfNull(retrieval);
         ArgumentNullException.ThrowIfNull(memory);
 
-        var sections = new List<ContextSection>();
+        var segments = new List<ContextSegment>();
         var included = new List<string>();
         var pruned = new List<string>();
-        AddSection(sections, "initiative-understanding", JsonSerializer.Serialize(understanding, JsonOptions));
-        AddSection(sections, "repository-facts", BuildRepositoryFacts(memory.SourceSnapshot));
+        AddSegment(
+            segments,
+            ContextSegmentKind.InitiativeUnderstanding,
+            JsonSerializer.Serialize(understanding, JsonOptions),
+            "initiative-understanding",
+            0,
+            mandatory: true);
+        AddSegment(
+            segments,
+            ContextSegmentKind.RepositoryIdentity,
+            BuildRepositoryFacts(memory.SourceSnapshot),
+            memory.SourceSnapshot.Repository.Id,
+            0,
+            mandatory: true);
 
         var rootNotes = memory.Manifest.Notes
             .Where(note => note.Kind is KnowledgeNoteKind.RootIndex or KnowledgeNoteKind.ArchitectureOverview)
             .OrderBy(note => note.Kind)
             .ToArray();
         await AddNotesWithinBudgetAsync(
-            sections,
+            segments,
             included,
             pruned,
-            "routing-memory",
             rootNotes,
             memory,
             _budget.RootAndArchitectureTokens,
@@ -63,10 +74,9 @@ public sealed class InitiativeContextBuilder
             .Cast<ManagedKnowledgeNote>()
             .ToArray();
         await AddNotesWithinBudgetAsync(
-            sections,
+            segments,
             included,
             pruned,
-            "project-memory",
             projectNotes,
             memory,
             _budget.ProjectNotesTokens,
@@ -79,10 +89,9 @@ public sealed class InitiativeContextBuilder
             .Cast<ManagedKnowledgeNote>()
             .ToArray();
         await AddNotesWithinBudgetAsync(
-            sections,
+            segments,
             included,
             pruned,
-            "component-memory",
             componentNotes,
             memory,
             _budget.ComponentNotesTokens,
@@ -92,20 +101,26 @@ public sealed class InitiativeContextBuilder
         var graph = BuildGraphEvidence(retrieval, memory.SourceSnapshot);
         if (_estimator.Estimate(graph) <= _budget.GraphEvidenceTokens)
         {
-            AddSection(sections, "selected-graph-evidence", graph);
+            AddSegment(
+                segments,
+                ContextSegmentKind.GraphEvidence,
+                graph,
+                "selected-graph-evidence",
+                0,
+                mandatory: true);
         }
 
-        var content = Render(sections);
+        var content = ContextSegmentRenderer.Render(segments);
         while (_estimator.Estimate(content) > _budget.MaximumReasoningInputTokens)
         {
-            var optional = sections.FindLastIndex(section => section.Name is "component-memory" or "project-memory");
+            var optional = segments.FindLastIndex(segment => !segment.Mandatory);
             if (optional < 0)
             {
                 throw new InvalidDataException(
                     $"Mandatory initiative context exceeds the {_budget.MaximumReasoningInputTokens} token hard limit.");
             }
 
-            var removedPath = GetNotePath(sections[optional].Content);
+            var removedPath = GetNotePath(segments[optional].Content);
             if (removedPath is not null)
             {
                 included.Remove(removedPath);
@@ -115,8 +130,8 @@ public sealed class InitiativeContextBuilder
                 }
             }
 
-            sections.RemoveAt(optional);
-            content = Render(sections);
+            segments.RemoveAt(optional);
+            content = ContextSegmentRenderer.Render(segments);
         }
 
         return new InitiativeContext(
@@ -124,14 +139,13 @@ public sealed class InitiativeContextBuilder
             _estimator.Estimate(content),
             included,
             pruned,
-            sections);
+            segments);
     }
 
     private async Task AddNotesWithinBudgetAsync(
-        ICollection<ContextSection> sections,
+        ICollection<ContextSegment> segments,
         ICollection<string> included,
         ICollection<string> pruned,
-        string sectionName,
         IReadOnlyList<ManagedKnowledgeNote> notes,
         ProjectMemorySyncResult memory,
         int maximumTokens,
@@ -139,8 +153,9 @@ public sealed class InitiativeContextBuilder
         CancellationToken cancellationToken)
     {
         var remaining = maximumTokens;
-        foreach (var note in notes)
+        for (var index = 0; index < notes.Count; index++)
         {
+            var note = notes[index];
             var content = await _reader.ReadManagedNoteAsync(memory, note, cancellationToken);
             var formatted = $"NOTE: {note.RelativePath}\n{content}";
             var tokens = _estimator.Estimate(formatted);
@@ -155,7 +170,21 @@ public sealed class InitiativeContextBuilder
                 continue;
             }
 
-            sections.Add(new ContextSection(sectionName, formatted, tokens));
+            var kind = note.Kind switch
+            {
+                KnowledgeNoteKind.RootIndex => ContextSegmentKind.RootIndex,
+                KnowledgeNoteKind.ArchitectureOverview => ContextSegmentKind.ArchitectureOverview,
+                KnowledgeNoteKind.Project => ContextSegmentKind.ProjectNote,
+                KnowledgeNoteKind.Component => ContextSegmentKind.ComponentNote,
+                _ => throw new InvalidDataException($"Knowledge note kind {note.Kind} cannot enter remote context.")
+            };
+            segments.Add(new ContextSegment(
+                kind,
+                formatted,
+                tokens,
+                note.SourceId ?? note.Identity,
+                index + 1,
+                required));
             included.Add(note.RelativePath);
             remaining -= tokens;
         }
@@ -235,12 +264,19 @@ public sealed class InitiativeContextBuilder
         return builder.ToString();
     }
 
-    private void AddSection(ICollection<ContextSection> sections, string name, string content) =>
-        sections.Add(new ContextSection(name, content, _estimator.Estimate(content)));
-
-    private static string Render(IEnumerable<ContextSection> sections) => string.Join(
-        "\n\n",
-        sections.Select(section => $"BEGIN_{section.Name.ToUpperInvariant().Replace('-', '_')}\n{section.Content}\nEND_{section.Name.ToUpperInvariant().Replace('-', '_')}"));
+    private void AddSegment(
+        ICollection<ContextSegment> segments,
+        ContextSegmentKind kind,
+        string content,
+        string? sourceIdentity,
+        int rank,
+        bool mandatory) => segments.Add(new ContextSegment(
+            kind,
+            content,
+            _estimator.Estimate(content),
+            sourceIdentity,
+            rank,
+            mandatory));
 
     private static string? GetNotePath(string content)
     {

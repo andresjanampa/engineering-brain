@@ -8,9 +8,39 @@ using OpenAI.Responses;
 
 namespace EngineeringBrain.Infrastructure;
 
-public sealed record OpenAIReasoningProviderOptions(TimeSpan Timeout, int MaximumRetries = 1)
+public sealed record OpenAIReasoningProviderOptions(
+    TimeSpan Timeout,
+    int MaximumRetries = 1,
+    string InterpretationReasoningEffort = "low",
+    string AnalysisReasoningEffort = "medium")
 {
     public static OpenAIReasoningProviderOptions Default { get; } = new(TimeSpan.FromMinutes(2));
+
+    public static OpenAIReasoningProviderOptions FromEnvironment(
+        Func<string, string?>? readEnvironment = null)
+    {
+        var read = readEnvironment ?? Environment.GetEnvironmentVariable;
+        return Default with
+        {
+            InterpretationReasoningEffort = read("ENGINEERING_BRAIN_INTERPRETATION_REASONING_EFFORT") ?? "low",
+            AnalysisReasoningEffort = read("ENGINEERING_BRAIN_ANALYSIS_REASONING_EFFORT") ?? "medium"
+        };
+    }
+
+    public string GetReasoningEffort(ReasoningStage stage) => stage switch
+    {
+        ReasoningStage.InitiativeUnderstanding => Normalize(InterpretationReasoningEffort),
+        ReasoningStage.ArchitectureAnalysis => Normalize(AnalysisReasoningEffort),
+        _ => throw new ArgumentOutOfRangeException(nameof(stage))
+    };
+
+    private static string Normalize(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "low" => "low",
+        "medium" => "medium",
+        "high" => "high",
+        _ => throw new ArgumentException($"Unsupported OpenAI reasoning effort '{value}'. Use low, medium, or high.")
+    };
 }
 
 public sealed class OpenAIReasoningProvider : IReasoningProvider
@@ -34,6 +64,8 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Timeout must be positive and retries cannot be negative.");
         }
+        _options.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
+        _options.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
     }
 
     public string Name => "OpenAI";
@@ -45,6 +77,7 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
         ArgumentNullException.ThrowIfNull(request);
         var stopwatch = Stopwatch.StartNew();
         var failure = "The provider did not return a result.";
+        var reasoningEffort = _options.GetReasoningEffort(request.Stage);
         for (var attempt = 0; attempt <= _options.MaximumRetries; attempt++)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -56,6 +89,16 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
                     Model = request.Model,
                     MaxOutputTokenCount = request.MaximumOutputTokens,
                     StoredOutputEnabled = false,
+                    ReasoningOptions = new ResponseReasoningOptions
+                    {
+                        ReasoningEffortLevel = reasoningEffort switch
+                        {
+                            "low" => ResponseReasoningEffortLevel.Low,
+                            "medium" => ResponseReasoningEffortLevel.Medium,
+                            "high" => ResponseReasoningEffortLevel.High,
+                            _ => throw new InvalidOperationException("Reasoning effort was not validated.")
+                        }
+                    },
                     TextOptions = new ResponseTextOptions
                     {
                         TextFormat = ResponseTextFormat.CreateJsonSchemaFormat(
@@ -81,7 +124,8 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
                         response.Usage?.InputTokenDetails?.CachedTokenCount,
                         response.Usage?.OutputTokenCount,
                         stopwatch.ElapsedMilliseconds,
-                        attempt));
+                        attempt,
+                        reasoningEffort));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {

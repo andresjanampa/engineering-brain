@@ -1,0 +1,194 @@
+{
+  "evaluationSchemaVersion": 1,
+  "id": "engineering-brain-initial-v1",
+  "description": "Initial non-sensitive offline corpus for lexical and graph-bounded retrieval.",
+  "cases": [
+    {
+      "id": "python-analyzer",
+      "description": "High reuse language analyzer extension",
+      "initiativePath": "cases/python-analyzer/initiative.md",
+      "tags": ["reuse-high"],
+      "understanding": {
+        "summary": "Add a Python language analyzer through the existing analyzer extension architecture.",
+        "actors": [], "functionalRequirements": ["Analyze Python projects"], "businessRules": [],
+        "dataRequirements": [], "integrations": [],
+        "technicalCapabilities": ["language analyzer", "extensible analyzer architecture", "ILanguageAnalyzer", "CSharpAnalyzer"],
+        "searchTerms": ["language analyzer", "ILanguageAnalyzer", "CSharpAnalyzer"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Analyzers.CSharp"], "acceptableProjects": ["EngineeringBrain.Core"], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "background-memory-audit",
+      "description": "New background memory integrity feature",
+      "initiativePath": "cases/background-memory-audit/initiative.md",
+      "tags": ["reuse-partial", "create-new"],
+      "understanding": {
+        "summary": "Periodically audit Project Memory integrity in a background task.",
+        "actors": [], "functionalRequirements": ["Audit Project Memory integrity"], "businessRules": [],
+        "dataRequirements": [], "integrations": [],
+        "technicalCapabilities": ["ProjectMemoryService", "ProjectMemoryValidator", "integrity audit"],
+        "searchTerms": ["ProjectMemoryService", "ProjectMemoryValidator", "memory integrity"], "constraints": [], "unknowns": ["Scheduling mechanism"]
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.ProjectMemoryService"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.ProjectMemoryValidator"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "create"], "evidenceEntities": ["EngineeringBrain.Infrastructure.ProjectMemoryService"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "web-code-graph",
+      "description": "Completely new web visualization",
+      "initiativePath": "cases/web-code-graph/initiative.md",
+      "tags": ["create-new"],
+      "understanding": {
+        "summary": "Create a web visualization over existing Code Graph facts.",
+        "actors": [], "functionalRequirements": ["Visualize Code Graph"], "businessRules": [],
+        "dataRequirements": ["Code graph entities and relations"], "integrations": [],
+        "technicalCapabilities": ["CodeEntity", "CodeRelation", "graph"],
+        "searchTerms": ["CodeEntity", "CodeRelation", "graph"], "constraints": [], "unknowns": ["Web technology"]
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Core.CodeEntity"],
+        "acceptableEntities": ["EngineeringBrain.Core.CodeRelation", "EngineeringBrain.Infrastructure.GraphMerger"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": ["EngineeringBrain.Core"], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "create"], "evidenceEntities": ["EngineeringBrain.Core.CodeEntity"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "ambiguous-notifications",
+      "description": "Underspecified notification request",
+      "initiativePath": "cases/ambiguous-notifications/initiative.md",
+      "tags": ["ambiguous"],
+      "understanding": {
+        "summary": "Add notifications for an unspecified important change.",
+        "actors": [], "functionalRequirements": ["Notify on important change"], "businessRules": [],
+        "dataRequirements": [], "integrations": [], "technicalCapabilities": ["notification"],
+        "searchTerms": ["notification"], "constraints": [], "unknowns": ["Trigger", "Recipient", "Channel"]
+      },
+      "expected": {
+        "requiredEntities": [], "acceptableEntities": [], "negativeEntities": [],
+        "requiredProjects": [], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": [], "evidenceEntities": [], "analysisStatus": "needsClarification"
+      }
+    },
+    {
+      "id": "security-repository-upload",
+      "description": "Unsafe whole-repository remote upload",
+      "initiativePath": "cases/security-repository-upload/initiative.md",
+      "tags": ["security"],
+      "understanding": {
+        "summary": "Evaluate a request to send complete repository content to a remote provider.",
+        "actors": [], "functionalRequirements": ["Remote repository context"], "businessRules": [],
+        "dataRequirements": [], "integrations": ["LLM provider"],
+        "technicalCapabilities": ["OutboundContextGuard", "InitiativeContextBuilder", "remote context"],
+        "searchTerms": ["OutboundContextGuard", "InitiativeContextBuilder", "context"], "constraints": ["No source bodies or complete snapshots"], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["avoidModifying"], "evidenceEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "exact-csharp-analyzer",
+      "description": "Exact component reference",
+      "initiativePath": "cases/exact-csharp-analyzer/initiative.md",
+      "tags": ["exact-name"],
+      "understanding": {
+        "summary": "Extend CSharpAnalyzer with a symbol category.",
+        "actors": [], "functionalRequirements": ["Analyze another symbol category"], "businessRules": [],
+        "dataRequirements": [], "integrations": [], "technicalCapabilities": ["CSharpAnalyzer", "symbol extraction"],
+        "searchTerms": ["CSharpAnalyzer", "symbol"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpSymbolExtractor"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Analyzers.CSharp"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["extend"], "evidenceEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "cli-command",
+      "description": "Project alias and CLI integration",
+      "initiativePath": "cases/cli-command/initiative.md",
+      "tags": ["alias"],
+      "understanding": {
+        "summary": "Add a command to EngineeringBrain.Cli.",
+        "actors": [], "functionalRequirements": ["Expose a CLI command"], "businessRules": [],
+        "dataRequirements": [], "integrations": [], "technicalCapabilities": ["BrainCli", "EngineeringBrain.Cli"],
+        "searchTerms": ["BrainCli", "EngineeringBrain.Cli", "command"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["BrainCli"], "acceptableEntities": [], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Cli"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["extend"], "evidenceEntities": ["BrainCli"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "spanish-language-analyzer",
+      "description": "Spanish language analyzer request",
+      "initiativePath": "cases/spanish-language-analyzer/initiative.md",
+      "tags": ["spanish", "reuse-high"],
+      "understanding": {
+        "summary": "Agregar un analizador de lenguaje reutilizando la arquitectura extensible.",
+        "actors": [], "functionalRequirements": ["Analizar otro lenguaje"], "businessRules": [],
+        "dataRequirements": [], "integrations": [],
+        "technicalCapabilities": ["analizador de lenguaje", "ILanguageAnalyzer", "arquitectura extensible"],
+        "searchTerms": ["analizador", "lenguaje", "ILanguageAnalyzer"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Analyzers.CSharp"], "acceptableProjects": ["EngineeringBrain.Core"], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "semantic-integration-tests",
+      "description": "Tests are intentionally relevant",
+      "initiativePath": "cases/semantic-integration-tests/initiative.md",
+      "tags": ["test-relevant"],
+      "understanding": {
+        "summary": "Add integration tests for semantic C# project analysis.",
+        "actors": [], "functionalRequirements": ["Verify project-aware semantic analysis"], "businessRules": [],
+        "dataRequirements": [], "integrations": [],
+        "technicalCapabilities": ["ProjectAwareIntegrationTests", "CSharpSemanticAnalysisTests", "semantic analysis"],
+        "searchTerms": ["ProjectAwareIntegrationTests", "CSharpSemanticAnalysisTests", "semantic"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Analyzers.CSharp.Tests.ProjectAwareIntegrationTests"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.Tests.CSharpSemanticAnalysisTests"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Analyzers.CSharp.Tests"], "acceptableProjects": ["EngineeringBrain.Analyzers.CSharp"], "negativeProjects": [],
+        "recommendationTypes": ["extend"], "evidenceEntities": ["EngineeringBrain.Analyzers.CSharp.Tests.ProjectAwareIntegrationTests"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "other-language-test-noise",
+      "description": "Measure test ranking noise for a production analyzer extension",
+      "initiativePath": "cases/other-language-test-noise/initiative.md",
+      "tags": ["test-noise", "reuse-high"],
+      "understanding": {
+        "summary": "Analyze another language through the existing language analyzer extension point.",
+        "actors": [], "functionalRequirements": ["Analyze another language"], "businessRules": [],
+        "dataRequirements": [], "integrations": [],
+        "technicalCapabilities": ["ILanguageAnalyzer", "language analyzer"],
+        "searchTerms": ["ILanguageAnalyzer", "language analyzer"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"],
+        "negativeEntities": ["EngineeringBrain.Analyzers.CSharp.Tests.CSharpSemanticAnalysisTests"],
+        "requiredProjects": ["EngineeringBrain.Analyzers.CSharp"], "acceptableProjects": ["EngineeringBrain.Core"],
+        "negativeProjects": ["EngineeringBrain.Analyzers.CSharp.Tests"],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"], "analysisStatus": "complete"
+      }
+    }
+  ]
+}
