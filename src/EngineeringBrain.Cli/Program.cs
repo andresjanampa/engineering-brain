@@ -8,20 +8,27 @@ internal static class BrainCli
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        if (args.Length == 0 || !args[0].Equals("scan", StringComparison.OrdinalIgnoreCase))
+        if (args.Length == 0)
         {
             WriteUsage();
-            return args.Length == 0 ? 0 : 2;
+            return 0;
         }
 
-        if (args.Length > 2)
+        var isScan = args[0].Equals("scan", StringComparison.OrdinalIgnoreCase);
+        var isMemorySync = args.Length >= 2
+            && args[0].Equals("memory", StringComparison.OrdinalIgnoreCase)
+            && args[1].Equals("sync", StringComparison.OrdinalIgnoreCase);
+        var maximumArguments = isMemorySync ? 3 : 2;
+        if ((!isScan && !isMemorySync) || args.Length > maximumArguments)
         {
-            Console.Error.WriteLine("Too many arguments.");
+            Console.Error.WriteLine("Invalid command or too many arguments.");
             WriteUsage();
             return 2;
         }
 
-        var path = args.Length == 2 ? args[1] : Environment.CurrentDirectory;
+        var path = isMemorySync
+            ? args.Length == 3 ? args[2] : Environment.CurrentDirectory
+            : args.Length == 2 ? args[1] : Environment.CurrentDirectory;
         using var cancellation = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) =>
         {
@@ -38,19 +45,63 @@ internal static class BrainCli
             var engine = new RepositoryAnalysisEngine(scanner, git, analyzers, store, git);
             var result = await engine.ScanAsync(path, cancellation.Token);
 
-            WriteSummary(result.Snapshot, result.SnapshotPath);
+            if (isMemorySync)
+            {
+                var memory = await new ProjectMemoryService().SyncAsync(
+                    result.Snapshot,
+                    cancellation.Token);
+                WriteMemorySummary(memory);
+            }
+            else
+            {
+                WriteSummary(result.Snapshot, result.SnapshotPath);
+            }
+
             return 0;
         }
         catch (OperationCanceledException)
         {
-            Console.Error.WriteLine("Scan cancelled.");
+            Console.Error.WriteLine("Command cancelled.");
             return 130;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            Console.Error.WriteLine($"Scan failed: {exception.Message}");
+            Console.Error.WriteLine($"Command failed: {exception.Message}");
             return 1;
         }
+    }
+
+    private static void WriteMemorySummary(ProjectMemorySyncResult result)
+    {
+        Console.WriteLine("Engineering Brain");
+        WriteSection("Project Memory");
+        Console.WriteLine($"Repository: {result.SourceSnapshot.Repository.Name}");
+        Console.WriteLine($"Branch: {result.Manifest.Branch}");
+        Console.WriteLine($"Mode: {result.Mode}");
+        Console.WriteLine($"Snapshot: schema {result.Manifest.SourceSnapshotSchema}");
+        Console.WriteLine($"Knowledge: schema {result.Manifest.KnowledgeSchemaVersion}");
+
+        WriteSection("Source");
+        Console.WriteLine($"Changes: {result.SourceSnapshot.Incremental.Metrics.ChangedFiles}");
+        Console.WriteLine($"Projects: {result.SourceSnapshot.Projects.Count}");
+        Console.WriteLine($"Entities: {result.SourceSnapshot.Entities.Count}");
+        Console.WriteLine($"Relations: {result.SourceSnapshot.Relations.Count}");
+
+        WriteSection("Memory");
+        Console.WriteLine($"Project notes: {result.Metrics.ProjectNotes}");
+        Console.WriteLine($"Component notes: {result.Metrics.ComponentNotes}");
+        Console.WriteLine($"Managed notes: {result.Metrics.TotalManagedNotes}");
+        Console.WriteLine($"Created: {result.Metrics.Created}");
+        Console.WriteLine($"Updated: {result.Metrics.Updated}");
+        Console.WriteLine($"Deleted: {result.Metrics.Deleted}");
+        Console.WriteLine($"Reused: {result.Metrics.Reused}");
+        Console.WriteLine($"Elapsed: {result.Metrics.ElapsedMilliseconds} ms");
+
+        WriteSection("Integrity");
+        Console.WriteLine(result.Integrity.IsValid ? "Valid" : "Invalid");
+
+        WriteSection("Location");
+        Console.WriteLine(result.Location);
     }
 
     private static void WriteSummary(RepositorySnapshot snapshot, string snapshotPath)
@@ -210,6 +261,7 @@ internal static class BrainCli
         Console.WriteLine("Engineering Brain");
         Console.WriteLine();
         Console.WriteLine("Usage: brain scan [path]");
+        Console.WriteLine("       brain memory sync [path]");
         Console.WriteLine("If path is omitted, the current directory is scanned.");
     }
 }

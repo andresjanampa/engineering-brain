@@ -6,7 +6,8 @@ Engineering Brain separates deterministic repository facts from future derived k
 CLI
  |-- repository scan, Git metadata, and snapshot comparison (Infrastructure)
  |-- language analysis (language-specific analyzers)
- `-- snapshot persistence (Infrastructure)
+ |-- snapshot persistence (Infrastructure)
+ `-- project-memory synchronization (Infrastructure)
 
 Core
  |-- domain records
@@ -27,8 +28,10 @@ solution/project discovery
 
 Project failures are isolated. Workspace failures are associated with a project only when its path or unique project filename is present in the diagnostic; ambiguous failures remain repository diagnostics and do not silently degrade unrelated projects.
 
-The structured code graph records objective facts. A future project-memory wiki will contain derived architecture, capabilities, initiatives, decisions, and risks. Project memory can cite the graph and source evidence, but it cannot replace code as the source of truth.
+The structured code graph records objective facts. Deterministic Project Memory projects validated snapshot facts into compact Markdown root, architecture, project, and top-level component notes. Every managed note carries provenance and a stable source fingerprint. Memory is isolated by repository and branch, and can cite the graph and source evidence, but it cannot replace code or the snapshot as the source of truth. Future LLM-enriched knowledge will be layered above this deterministic foundation.
 
 Incremental scans compare schema-compatible snapshots, resolve changed files to projects, invalidate transitive dependents, selectively invoke analyzers, merge reusable graph partitions, and validate IDs and relation endpoints before atomically replacing `latest.json`.
 
 Snapshot schema 3 adds safe file timestamps, file changes, project reuse decisions, performance metrics, and graph-integrity results to the existing evidence contract.
+
+Project Memory has an independent knowledge schema. Its manifest controls incremental reuse and stale managed-note deletion; unmanaged files are outside its ownership. Notes use deterministic LF output, collision-safe filenames, bounded collections, relative source evidence, and resolvable wiki links.
