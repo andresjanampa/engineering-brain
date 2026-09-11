@@ -262,22 +262,24 @@ internal static class BrainCli
             var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
             var harness = new EvaluationHarness();
             var cases = await harness.EvaluateAsync(suite, suitePath, memory, cancellation.Token);
-            var aggregate = EvaluationHarness.Aggregate(cases);
+            var splits = EvaluationHarness.Grouped(cases);
+            var aggregate = splits.All;
             var baselinePath = Path.Combine(Path.GetDirectoryName(suitePath)!, "baseline.json");
             var baseline = await EvaluationResultStore.LoadBaselineAsync(baselinePath, cancellation.Token);
+            var expectedBaselineCases = baseline?.Splits is null ? splits.Tuning.Cases : splits.All.Cases;
             if (baseline is not null && (baseline.EvaluationSchemaVersion != suite.EvaluationSchemaVersion
                 || !baseline.SuiteId.Equals(suite.Id, StringComparison.Ordinal)
-                || baseline.CaseCount != suite.Cases.Count))
+                || baseline.CaseCount != expectedBaselineCases))
             {
                 throw new InvalidDataException("Evaluation baseline is incompatible with the current suite schema, identity, or case count.");
             }
             var regressions = baseline is null || updateBaseline
                 ? []
-                : new EvaluationBaselineComparer().Compare(baseline, aggregate, currentCases: cases);
+                : new EvaluationBaselineComparer().CompareGrouped(baseline, splits, cases);
             var result = new EvaluationRunResult(
                 suite.EvaluationSchemaVersion, suite.Id, scan.Snapshot.Repository.Id,
                 scan.Snapshot.Git.Branch ?? "(no branch)", scan.Snapshot.Analysis.AnalyzerVersion,
-                EvaluationHarness.RetrievalVersion, DateTimeOffset.UtcNow, aggregate,
+                EvaluationHarness.RetrievalVersion, DateTimeOffset.UtcNow, aggregate, splits,
                 EvaluationHarness.Categories(cases), cases, regressions,
                 updateBaseline ? "Updated explicitly" : baseline is null ? "Missing" : "Compared",
                 string.Empty);
@@ -287,7 +289,7 @@ internal static class BrainCli
                     result.AnalyzerVersion, result.RetrievalVersion, cases.Count, aggregate,
                     cases.Select(item => new EvaluationBaselineCase(item.Id, item.Retrieval.RecallAt10,
                         item.Retrieval.MeanReciprocalRank, item.Retrieval.ProjectMeanReciprocalRank,
-                        item.Context.EstimatedCall2Tokens)).ToArray());
+                        item.Context.EstimatedCall2Tokens, item.Split)).ToArray(), splits);
                 await EvaluationResultStore.SaveBaselineAsync(baselinePath, created, cancellation.Token);
             }
             var resultStore = new EvaluationResultStore();
@@ -367,29 +369,9 @@ internal static class BrainCli
         Console.WriteLine($"Passed: {result.Aggregate.Passed}");
         Console.WriteLine($"Regressions: {result.Regressions.Count}");
         Console.WriteLine($"Baseline: {result.BaselineStatus} ({baselinePath})");
-        WriteSection("Retrieval");
-        Console.WriteLine($"Recall@5: {result.Aggregate.RecallAt5:F3}");
-        Console.WriteLine($"Recall@10: {result.Aggregate.RecallAt10:F3}");
-        Console.WriteLine($"Precision@5: {result.Aggregate.PrecisionAt5:F3}");
-        Console.WriteLine($"Precision@10: {result.Aggregate.PrecisionAt10:F3}");
-        Console.WriteLine($"MRR: {result.Aggregate.MeanReciprocalRank:F3}");
-        Console.WriteLine($"Average candidates: {result.Aggregate.AverageCandidateCount:F1}");
-        Console.WriteLine($"Average selected components: {result.Aggregate.AverageSelectedComponents:F1}");
-        WriteSection("Projects");
-        Console.WriteLine($"Recall@3: {result.Aggregate.ProjectRecallAt3:F3}");
-        Console.WriteLine($"MRR: {result.Aggregate.ProjectMeanReciprocalRank:F3}");
-        WriteSection("Evidence And Test Noise");
-        Console.WriteLine($"Evidence validation rate: {result.Aggregate.EvidenceValidationRate:F3}");
-        Console.WriteLine($"Invalid evidence: {result.Aggregate.InvalidEvidenceCount}");
-        Console.WriteLine($"Fabricated entity accepted: {result.Aggregate.FabricatedEntitiesAccepted}");
-        Console.WriteLine($"Non-test TestCandidateRatio@10: {result.Aggregate.NonTestCaseTestCandidateRatioAt10:F3}");
-        Console.WriteLine($"Test-relevant TestCandidateRatio@10: {result.Aggregate.TestRelevantCaseTestCandidateRatioAt10:F3}");
-        Console.WriteLine($"NeedsClarification expected/actual: {result.Aggregate.NeedsClarificationExpected}/{result.Aggregate.NeedsClarificationActual}");
-        WriteSection("Context");
-        Console.WriteLine($"CALL #2 tokens average: {result.Aggregate.AverageCall2Tokens:F1}");
-        Console.WriteLine($"CALL #2 tokens median: {result.Aggregate.MedianCall2Tokens:F1}");
-        Console.WriteLine($"CALL #2 tokens max: {result.Aggregate.MaximumCall2Tokens}");
-        Console.WriteLine($"Budget violations: {result.Aggregate.BudgetViolations}");
+        WriteAggregate("Tuning Metrics", result.Splits.Tuning);
+        WriteAggregate("Holdout Metrics", result.Splits.Holdout);
+        WriteAggregate("All Metrics", result.Splits.All);
         WriteSection("Per Category");
         foreach (var category in result.Categories)
             Console.WriteLine($"{category.Category}: cases={category.Cases}; entity cases={category.EntityRetrievalCases}; "
@@ -411,6 +393,21 @@ internal static class BrainCli
         }
         WriteSection("Result");
         Console.WriteLine(result.ResultPath);
+    }
+
+    private static void WriteAggregate(string title, EvaluationAggregateMetrics metrics)
+    {
+        WriteSection(title);
+        Console.WriteLine($"Cases: {metrics.Cases}; passed: {metrics.Passed}");
+        Console.WriteLine($"Recall@5: {metrics.RecallAt5:F3}; Recall@10: {metrics.RecallAt10:F3}");
+        Console.WriteLine($"Precision@5: {metrics.PrecisionAt5:F3}; Precision@10: {metrics.PrecisionAt10:F3}; MRR: {metrics.MeanReciprocalRank:F3}");
+        Console.WriteLine($"Project Recall@3: {metrics.ProjectRecallAt3:F3}; Project MRR: {metrics.ProjectMeanReciprocalRank:F3}");
+        Console.WriteLine($"Non-test TestCandidateRatio@5: {metrics.NonTestCaseTestCandidateRatioAt5:F3}; @10: {metrics.NonTestCaseTestCandidateRatioAt10:F3}");
+        Console.WriteLine($"Test-relevant TestCandidateRatio@5: {metrics.TestRelevantCaseTestCandidateRatioAt5:F3}; @10: {metrics.TestRelevantCaseTestCandidateRatioAt10:F3}");
+        Console.WriteLine($"Average candidates: {metrics.AverageCandidateCount:F1}; selected components: {metrics.AverageSelectedComponents:F1}");
+        Console.WriteLine($"CALL #2 tokens average/median/max: {metrics.AverageCall2Tokens:F1}/{metrics.MedianCall2Tokens:F1}/{metrics.MaximumCall2Tokens}");
+        Console.WriteLine($"Budget violations: {metrics.BudgetViolations}; evidence validation: {metrics.EvidenceValidationRate:F3}; invalid evidence: {metrics.InvalidEvidenceCount}");
+        Console.WriteLine($"Fabricated entity accepted: {metrics.FabricatedEntitiesAccepted}; NeedsClarification expected/actual: {metrics.NeedsClarificationExpected}/{metrics.NeedsClarificationActual}");
     }
 
     private static void WriteAnalysis(InitiativeAnalysisResult result)

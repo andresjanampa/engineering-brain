@@ -8,6 +8,7 @@
       "description": "High reuse language analyzer extension",
       "initiativePath": "cases/python-analyzer/initiative.md",
       "tags": ["reuse-high"],
+      "split": "tuning",
       "understanding": {
         "summary": "Add a Python language analyzer through the existing analyzer extension architecture.",
         "actors": [], "functionalRequirements": ["Analyze Python projects"], "businessRules": [],
@@ -27,6 +28,7 @@
       "description": "New background memory integrity feature",
       "initiativePath": "cases/background-memory-audit/initiative.md",
       "tags": ["reuse-partial", "create-new"],
+      "split": "tuning",
       "understanding": {
         "summary": "Periodically audit Project Memory integrity in a background task.",
         "actors": [], "functionalRequirements": ["Audit Project Memory integrity"], "businessRules": [],
@@ -46,6 +48,7 @@
       "description": "Completely new web visualization",
       "initiativePath": "cases/web-code-graph/initiative.md",
       "tags": ["create-new"],
+      "split": "tuning",
       "understanding": {
         "summary": "Create a web visualization over existing Code Graph facts.",
         "actors": [], "functionalRequirements": ["Visualize Code Graph"], "businessRules": [],
@@ -65,6 +68,7 @@
       "description": "Underspecified notification request",
       "initiativePath": "cases/ambiguous-notifications/initiative.md",
       "tags": ["ambiguous"],
+      "split": "tuning",
       "understanding": {
         "summary": "Add notifications for an unspecified important change.",
         "actors": [], "functionalRequirements": ["Notify on important change"], "businessRules": [],
@@ -82,6 +86,7 @@
       "description": "Unsafe whole-repository remote upload",
       "initiativePath": "cases/security-repository-upload/initiative.md",
       "tags": ["security"],
+      "split": "tuning",
       "understanding": {
         "summary": "Evaluate a request to send complete repository content to a remote provider.",
         "actors": [], "functionalRequirements": ["Remote repository context"], "businessRules": [],
@@ -101,6 +106,7 @@
       "description": "Exact component reference",
       "initiativePath": "cases/exact-csharp-analyzer/initiative.md",
       "tags": ["exact-name"],
+      "split": "tuning",
       "understanding": {
         "summary": "Extend CSharpAnalyzer with a symbol category.",
         "actors": [], "functionalRequirements": ["Analyze another symbol category"], "businessRules": [],
@@ -119,6 +125,7 @@
       "description": "Project alias and CLI integration",
       "initiativePath": "cases/cli-command/initiative.md",
       "tags": ["alias"],
+      "split": "tuning",
       "understanding": {
         "summary": "Add a command to EngineeringBrain.Cli.",
         "actors": [], "functionalRequirements": ["Expose a CLI command"], "businessRules": [],
@@ -136,6 +143,7 @@
       "description": "Spanish language analyzer request",
       "initiativePath": "cases/spanish-language-analyzer/initiative.md",
       "tags": ["spanish", "reuse-high"],
+      "split": "tuning",
       "understanding": {
         "summary": "Agregar un analizador de lenguaje reutilizando la arquitectura extensible.",
         "actors": [], "functionalRequirements": ["Analizar otro lenguaje"], "businessRules": [],
@@ -155,6 +163,7 @@
       "description": "Tests are intentionally relevant",
       "initiativePath": "cases/semantic-integration-tests/initiative.md",
       "tags": ["test-relevant"],
+      "split": "tuning",
       "understanding": {
         "summary": "Add integration tests for semantic C# project analysis.",
         "actors": [], "functionalRequirements": ["Verify project-aware semantic analysis"], "businessRules": [],
@@ -174,6 +183,7 @@
       "description": "Measure test ranking noise for a production analyzer extension",
       "initiativePath": "cases/other-language-test-noise/initiative.md",
       "tags": ["test-noise", "reuse-high"],
+      "split": "tuning",
       "understanding": {
         "summary": "Analyze another language through the existing language analyzer extension point.",
         "actors": [], "functionalRequirements": ["Analyze another language"], "businessRules": [],
@@ -188,6 +198,126 @@
         "requiredProjects": ["EngineeringBrain.Analyzers.CSharp"], "acceptableProjects": ["EngineeringBrain.Core"],
         "negativeProjects": ["EngineeringBrain.Analyzers.CSharp.Tests"],
         "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "holdout-analyzer-registration",
+      "description": "Register an analyzer through an extension point without changing the command entry point",
+      "initiativePath": "cases/holdout-analyzer-registration/initiative.md",
+      "tags": ["holdout", "extensibility"],
+      "split": "holdout",
+      "understanding": {
+        "summary": "Register a language analyzer through the existing extension contract.",
+        "actors": [], "functionalRequirements": ["Register another language analyzer"], "businessRules": [],
+        "dataRequirements": [], "integrations": [],
+        "technicalCapabilities": ["language analyzer contract", "extension point", "registration"],
+        "searchTerms": ["language analyzer", "contract", "extension"], "constraints": ["Do not modify the main command"], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"], "negativeEntities": ["BrainCli"],
+        "requiredProjects": ["EngineeringBrain.Core"], "acceptableProjects": ["EngineeringBrain.Analyzers.CSharp"], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "holdout-graph-integrity",
+      "description": "Validate graph integrity after constructing repository representation",
+      "initiativePath": "cases/holdout-graph-integrity/initiative.md",
+      "tags": ["holdout", "graph-integrity"],
+      "split": "holdout",
+      "understanding": {
+        "summary": "Validate graph integrity after repository graph construction.",
+        "actors": [], "functionalRequirements": ["Detect invalid graph references"], "businessRules": [],
+        "dataRequirements": ["Graph entities and relations"], "integrations": [],
+        "technicalCapabilities": ["graph integrity validation", "repository graph"],
+        "searchTerms": ["graph", "integrity", "validation"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.GraphIntegrityValidator"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.GraphMerger"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Infrastructure.GraphIntegrityValidator"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "holdout-incremental-persistence",
+      "description": "Avoid unnecessary persistence writes for incremental state",
+      "initiativePath": "cases/holdout-incremental-persistence/initiative.md",
+      "tags": ["holdout", "incremental", "persistence"],
+      "split": "holdout",
+      "understanding": {
+        "summary": "Optimize incremental snapshot persistence to avoid unchanged writes.",
+        "actors": [], "functionalRequirements": ["Persist incremental repository state efficiently"], "businessRules": [],
+        "dataRequirements": ["Snapshot state"], "integrations": [],
+        "technicalCapabilities": ["incremental snapshot persistence", "local store"],
+        "searchTerms": ["incremental", "snapshot", "persistence", "store"], "constraints": ["Avoid unnecessary writes"], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.LocalRepositorySnapshotStore"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.IncrementalChangeDetector"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Infrastructure.LocalRepositorySnapshotStore"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "holdout-project-dependents",
+      "description": "Query reverse project dependencies from evaluated project references",
+      "initiativePath": "cases/holdout-project-dependents/initiative.md",
+      "tags": ["holdout", "project-dependencies"],
+      "split": "holdout",
+      "understanding": {
+        "summary": "Query projects that depend on another project through project references.",
+        "actors": [], "functionalRequirements": ["Find dependent projects"], "businessRules": [],
+        "dataRequirements": ["Project references"], "integrations": [],
+        "technicalCapabilities": ["project dependency graph", "reverse dependencies"],
+        "searchTerms": ["project", "dependency", "dependents", "references"], "constraints": [], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.ProjectDependencyGraph"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.AffectedProjectResolver"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Infrastructure.ProjectDependencyGraph"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "holdout-spanish-outbound-validation",
+      "description": "Spanish request for validation before sending remote context",
+      "initiativePath": "cases/holdout-spanish-outbound-validation/initiative.md",
+      "tags": ["holdout", "spanish", "security"],
+      "split": "holdout",
+      "understanding": {
+        "summary": "Validar el contexto saliente antes de enviarlo a un proveedor remoto.",
+        "actors": [], "functionalRequirements": ["Validar contexto remoto"], "businessRules": [],
+        "dataRequirements": [], "integrations": ["Proveedor remoto"],
+        "technicalCapabilities": ["outbound context validation", "remote provider safety"],
+        "searchTerms": ["outbound", "context", "validation", "remote"], "constraints": ["No enviar datos inseguros"], "unknowns": []
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "extend"], "evidenceEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"], "analysisStatus": "complete"
+      }
+    },
+    {
+      "id": "holdout-evaluation-export",
+      "description": "Export evaluation metrics to a new structured format",
+      "initiativePath": "cases/holdout-evaluation-export/initiative.md",
+      "tags": ["holdout", "evaluation", "create-new"],
+      "split": "holdout",
+      "understanding": {
+        "summary": "Export evaluation metrics through another structured output format.",
+        "actors": [], "functionalRequirements": ["Export evaluation results"], "businessRules": [],
+        "dataRequirements": ["Evaluation metrics"], "integrations": [],
+        "technicalCapabilities": ["evaluation result persistence", "structured export"],
+        "searchTerms": ["evaluation", "result", "metrics", "export", "format"], "constraints": [], "unknowns": ["Target format"]
+      },
+      "expected": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.EvaluationResultStore"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.EvaluationHarness"], "negativeEntities": [],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"], "acceptableProjects": [], "negativeProjects": [],
+        "recommendationTypes": ["reuse", "create"], "evidenceEntities": ["EngineeringBrain.Infrastructure.EvaluationResultStore"], "analysisStatus": "complete"
       }
     }
   ]

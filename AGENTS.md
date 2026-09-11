@@ -27,5 +27,7 @@ Keep these rules true as the product evolves:
 - Preserve snapshot and CLI backward compatibility as the product evolves, or document and version intentional breaks.
 - Avoid infrastructure and abstractions until a demonstrated use case needs them.
 - Measure retrieval and context quality before optimizing them; do not tune behavior to individual golden cases.
+- Preserve an explicit tuning/holdout boundary; use holdout results to assess generalization, not to tune case-specific behavior.
+- Optimize retrieval ranking without sacrificing bounded candidate counts or recall.
 - Require explicit review before updating an evaluation baseline. A normal evaluation must never auto-accept its results.
 - Keep outbound remote context previewable and auditable without network access.

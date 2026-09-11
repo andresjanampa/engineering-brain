@@ -106,6 +106,41 @@ public static class EvaluationMetricsCalculator
 
 public sealed class EvaluationBaselineComparer
 {
+    public IReadOnlyList<EvaluationRegression> CompareGrouped(
+        EvaluationBaseline baseline,
+        EvaluationGroupedMetrics current,
+        IReadOnlyList<EvaluationCaseResult> currentCases,
+        EvaluationThresholds? thresholds = null)
+    {
+        if (baseline.Splits is null)
+        {
+            return Compare(baseline, current.Tuning, thresholds,
+                currentCases.Where(item => item.Split == EvaluationSplit.Tuning).ToArray());
+        }
+
+        var regressions = new List<EvaluationRegression>();
+        CompareGroup("ALL", baseline.Aggregate, current.All, baseline.Cases, currentCases);
+        CompareGroup("TUNING", baseline.Splits.Tuning, current.Tuning,
+            baseline.Cases.Where(item => item.Split == EvaluationSplit.Tuning).ToArray(),
+            currentCases.Where(item => item.Split == EvaluationSplit.Tuning).ToArray());
+        CompareGroup("HOLDOUT", baseline.Splits.Holdout, current.Holdout,
+            baseline.Cases.Where(item => item.Split == EvaluationSplit.Holdout).ToArray(),
+            currentCases.Where(item => item.Split == EvaluationSplit.Holdout).ToArray());
+        return regressions;
+
+        void CompareGroup(
+            string label,
+            EvaluationAggregateMetrics previous,
+            EvaluationAggregateMetrics value,
+            IReadOnlyList<EvaluationBaselineCase> previousCases,
+            IReadOnlyList<EvaluationCaseResult> valueCases)
+        {
+            var comparison = baseline with { Aggregate = previous, Cases = previousCases };
+            regressions.AddRange(Compare(comparison, value, thresholds, valueCases)
+                .Select(item => item with { Metric = $"{label} {item.Metric}" }));
+        }
+    }
+
     public IReadOnlyList<EvaluationRegression> Compare(
         EvaluationBaseline baseline,
         EvaluationAggregateMetrics current,
@@ -155,7 +190,7 @@ public sealed class EvaluationBaselineComparer
 
 public sealed class EvaluationHarness
 {
-    public const string RetrievalVersion = "lexical-graph-v1";
+    public const string RetrievalVersion = "lexical-graph-v2";
     private readonly InitiativeCandidateRetriever _retriever;
     private readonly InitiativeContextBuilder _contextBuilder;
     private readonly AnalysisEvidenceValidator _validator;
@@ -211,7 +246,9 @@ public sealed class EvaluationHarness
             Average(entityCases, item => item.Retrieval.PrecisionAt5), Average(entityCases, item => item.Retrieval.PrecisionAt10),
             Average(entityCases, item => item.Retrieval.MeanReciprocalRank), Average(projectCases, item => item.Retrieval.ProjectRecallAt3),
             Average(projectCases, item => item.Retrieval.ProjectMeanReciprocalRank),
+            nonTest.Length == 0 ? 0 : nonTest.Average(item => item.Retrieval.TestCandidateRatioAt5),
             nonTest.Length == 0 ? 0 : nonTest.Average(item => item.Retrieval.TestCandidateRatioAt10),
+            test.Length == 0 ? 0 : test.Average(item => item.Retrieval.TestCandidateRatioAt5),
             test.Length == 0 ? 0 : test.Average(item => item.Retrieval.TestCandidateRatioAt10),
             cases.Count == 0 ? 0 : cases.Average(item => item.Context.CandidateCount),
             cases.Count == 0 ? 0 : cases.Average(item => item.Context.SelectedComponentCount),
@@ -228,6 +265,11 @@ public sealed class EvaluationHarness
         static double Average(IReadOnlyList<EvaluationCaseResult> source, Func<EvaluationCaseResult, double> selector) =>
             source.Count == 0 ? 0 : source.Average(selector);
     }
+
+    public static EvaluationGroupedMetrics Grouped(IReadOnlyList<EvaluationCaseResult> cases) => new(
+        Aggregate(cases.Where(item => item.Split == EvaluationSplit.Tuning).ToArray()),
+        Aggregate(cases.Where(item => item.Split == EvaluationSplit.Holdout).ToArray()),
+        Aggregate(cases));
 
     public static IReadOnlyList<EvaluationCategoryMetrics> Categories(IReadOnlyList<EvaluationCaseResult> cases) =>
         cases.SelectMany(item => item.Tags.Select(tag => (Tag: tag, Case: item)))
@@ -269,6 +311,7 @@ public sealed class EvaluationHarness
             EvaluationMetricsCalculator.ReciprocalRank(projectRanked, item.Expected.RequiredProjects),
             retrieval.Components.Take(5).Count(IsTestCandidate),
             retrieval.Components.Take(10).Count(IsTestCandidate),
+            retrieval.Components.Count == 0 ? 0 : retrieval.Components.Take(5).Count(IsTestCandidate) / (double)Math.Min(5, retrieval.Components.Count),
             retrieval.Components.Count == 0 ? 0 : retrieval.Components.Take(10).Count(IsTestCandidate) / (double)Math.Min(10, retrieval.Components.Count),
             Dominates(entityRanked, item.Expected.NegativeEntities)
                 || Dominates(projectRanked, item.Expected.NegativeProjects),
@@ -324,7 +367,7 @@ public sealed class EvaluationHarness
             && recommendations.FabricatedEntitiesAccepted == 0
             && recommendations.NeedsClarificationExpected == recommendations.NeedsClarificationActual
             && !contextMetrics.BudgetViolation;
-        return new EvaluationCaseResult(item.Id, item.Tags, passed, retrievalMetrics, recommendations, contextMetrics,
+        return new EvaluationCaseResult(item.Id, item.Tags, item.Split, passed, retrievalMetrics, recommendations, contextMetrics,
             retrieval.Components.Take(10).Select((value, index) => Ranked(value.EntityId, index, value.Score, value.MatchReasons, IsTestCandidate(value))).ToArray(),
             retrieval.Projects.Take(5).Select((value, index) => Ranked(value.ProjectId, index, value.Score, value.MatchReasons, IsTestCandidate(value))).ToArray(),
             missingEntities, missingProjects, diagnostics);

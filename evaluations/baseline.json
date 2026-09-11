@@ -2,25 +2,27 @@
   "evaluationSchemaVersion": 1,
   "suiteId": "engineering-brain-initial-v1",
   "analyzerVersion": "csharp-project-aware-v3",
-  "retrievalVersion": "lexical-graph-v1",
-  "caseCount": 10,
+  "retrievalVersion": "lexical-graph-v2",
+  "caseCount": 16,
   "aggregate": {
-    "cases": 10,
-    "passed": 10,
-    "recallAt5": 0.7777777777777778,
+    "cases": 16,
+    "passed": 16,
+    "recallAt5": 1,
     "recallAt10": 1,
-    "precisionAt5": 0.3111111111111111,
-    "precisionAt10": 0.18888888888888888,
-    "meanReciprocalRank": 0.5138888888888888,
+    "precisionAt5": 0.32000000000000006,
+    "precisionAt10": 0.17333333333333334,
+    "meanReciprocalRank": 0.8555555555555556,
     "projectRecallAt3": 1,
-    "projectMeanReciprocalRank": 0.9444444444444444,
-    "nonTestCaseTestCandidateRatioAt10": 0.32469135802469135,
+    "projectMeanReciprocalRank": 0.9,
+    "nonTestCaseTestCandidateRatioAt5": 0.06666666666666667,
+    "nonTestCaseTestCandidateRatioAt10": 0.12000000000000001,
+    "testRelevantCaseTestCandidateRatioAt5": 1,
     "testRelevantCaseTestCandidateRatioAt10": 1,
-    "averageCandidateCount": 188,
-    "averageSelectedComponents": 12.1,
-    "averageCall2Tokens": 14001.3,
-    "medianCall2Tokens": 14159.5,
-    "maximumCall2Tokens": 15891,
+    "averageCandidateCount": 193,
+    "averageSelectedComponents": 12.1875,
+    "averageCall2Tokens": 13478.3125,
+    "medianCall2Tokens": 13644,
+    "maximumCall2Tokens": 15643,
     "budgetViolations": 0,
     "evidenceValidationRate": 1,
     "invalidEvidenceCount": 0,
@@ -34,70 +36,208 @@
       "recallAt10": 1,
       "meanReciprocalRank": 0.5,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 14453
+      "estimatedCall2Tokens": 12000,
+      "split": "tuning"
     },
     {
       "id": "background-memory-audit",
       "recallAt10": 1,
       "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 14243
+      "estimatedCall2Tokens": 12022,
+      "split": "tuning"
     },
     {
       "id": "web-code-graph",
       "recallAt10": 1,
-      "meanReciprocalRank": 0.125,
+      "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 0.5,
-      "estimatedCall2Tokens": 15357
+      "estimatedCall2Tokens": 12066,
+      "split": "tuning"
     },
     {
       "id": "ambiguous-notifications",
       "recallAt10": 1,
       "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 11717
+      "estimatedCall2Tokens": 12888,
+      "split": "tuning"
     },
     {
       "id": "security-repository-upload",
       "recallAt10": 1,
-      "meanReciprocalRank": 0.16666666666666666,
+      "meanReciprocalRank": 0.5,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 15891
+      "estimatedCall2Tokens": 15406,
+      "split": "tuning"
     },
     {
       "id": "exact-csharp-analyzer",
       "recallAt10": 1,
-      "meanReciprocalRank": 0.5,
+      "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 13970
+      "estimatedCall2Tokens": 12029,
+      "split": "tuning"
     },
     {
       "id": "cli-command",
       "recallAt10": 1,
       "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 15257
+      "estimatedCall2Tokens": 14637,
+      "split": "tuning"
     },
     {
       "id": "spanish-language-analyzer",
       "recallAt10": 1,
-      "meanReciprocalRank": 0.5,
+      "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 13414
+      "estimatedCall2Tokens": 13550,
+      "split": "tuning"
     },
     {
       "id": "semantic-integration-tests",
       "recallAt10": 1,
-      "meanReciprocalRank": 0.3333333333333333,
+      "meanReciprocalRank": 0.5,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 11635
+      "estimatedCall2Tokens": 11630,
+      "split": "tuning"
     },
     {
       "id": "other-language-test-noise",
       "recallAt10": 1,
-      "meanReciprocalRank": 0.5,
+      "meanReciprocalRank": 1,
       "projectMeanReciprocalRank": 1,
-      "estimatedCall2Tokens": 14076
+      "estimatedCall2Tokens": 14272,
+      "split": "tuning"
+    },
+    {
+      "id": "holdout-analyzer-registration",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 0.5,
+      "estimatedCall2Tokens": 14433,
+      "split": "holdout"
+    },
+    {
+      "id": "holdout-graph-integrity",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 13677,
+      "split": "holdout"
+    },
+    {
+      "id": "holdout-incremental-persistence",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 0.5,
+      "estimatedCall2Tokens": 13664,
+      "split": "holdout"
+    },
+    {
+      "id": "holdout-project-dependents",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 15643,
+      "split": "holdout"
+    },
+    {
+      "id": "holdout-spanish-outbound-validation",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.3333333333333333,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 14112,
+      "split": "holdout"
+    },
+    {
+      "id": "holdout-evaluation-export",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 13624,
+      "split": "holdout"
     }
-  ]
+  ],
+  "splits": {
+    "tuning": {
+      "cases": 10,
+      "passed": 10,
+      "recallAt5": 1,
+      "recallAt10": 1,
+      "precisionAt5": 0.37777777777777777,
+      "precisionAt10": 0.19999999999999998,
+      "meanReciprocalRank": 0.8333333333333334,
+      "projectRecallAt3": 1,
+      "projectMeanReciprocalRank": 0.9444444444444444,
+      "nonTestCaseTestCandidateRatioAt5": 0.06666666666666668,
+      "nonTestCaseTestCandidateRatioAt10": 0.1111111111111111,
+      "testRelevantCaseTestCandidateRatioAt5": 1,
+      "testRelevantCaseTestCandidateRatioAt10": 1,
+      "averageCandidateCount": 193,
+      "averageSelectedComponents": 12.1,
+      "averageCall2Tokens": 13050,
+      "medianCall2Tokens": 12477,
+      "maximumCall2Tokens": 15406,
+      "budgetViolations": 0,
+      "evidenceValidationRate": 1,
+      "invalidEvidenceCount": 0,
+      "fabricatedEntitiesAccepted": 0,
+      "needsClarificationExpected": 1,
+      "needsClarificationActual": 1
+    },
+    "holdout": {
+      "cases": 6,
+      "passed": 6,
+      "recallAt5": 1,
+      "recallAt10": 1,
+      "precisionAt5": 0.2333333333333333,
+      "precisionAt10": 0.13333333333333333,
+      "meanReciprocalRank": 0.8888888888888888,
+      "projectRecallAt3": 1,
+      "projectMeanReciprocalRank": 0.8333333333333334,
+      "nonTestCaseTestCandidateRatioAt5": 0.06666666666666667,
+      "nonTestCaseTestCandidateRatioAt10": 0.13333333333333333,
+      "testRelevantCaseTestCandidateRatioAt5": 0,
+      "testRelevantCaseTestCandidateRatioAt10": 0,
+      "averageCandidateCount": 193,
+      "averageSelectedComponents": 12.333333333333334,
+      "averageCall2Tokens": 14192.166666666666,
+      "medianCall2Tokens": 13894.5,
+      "maximumCall2Tokens": 15643,
+      "budgetViolations": 0,
+      "evidenceValidationRate": 1,
+      "invalidEvidenceCount": 0,
+      "fabricatedEntitiesAccepted": 0,
+      "needsClarificationExpected": 0,
+      "needsClarificationActual": 0
+    },
+    "all": {
+      "cases": 16,
+      "passed": 16,
+      "recallAt5": 1,
+      "recallAt10": 1,
+      "precisionAt5": 0.32000000000000006,
+      "precisionAt10": 0.17333333333333334,
+      "meanReciprocalRank": 0.8555555555555556,
+      "projectRecallAt3": 1,
+      "projectMeanReciprocalRank": 0.9,
+      "nonTestCaseTestCandidateRatioAt5": 0.06666666666666667,
+      "nonTestCaseTestCandidateRatioAt10": 0.12000000000000001,
+      "testRelevantCaseTestCandidateRatioAt5": 1,
+      "testRelevantCaseTestCandidateRatioAt10": 1,
+      "averageCandidateCount": 193,
+      "averageSelectedComponents": 12.1875,
+      "averageCall2Tokens": 13478.3125,
+      "medianCall2Tokens": 13644,
+      "maximumCall2Tokens": 15643,
+      "budgetViolations": 0,
+      "evidenceValidationRate": 1,
+      "invalidEvidenceCount": 0,
+      "fabricatedEntitiesAccepted": 0,
+      "needsClarificationExpected": 1,
+      "needsClarificationActual": 1
+    }
+  }
 }
