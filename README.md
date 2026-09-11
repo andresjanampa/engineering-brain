@@ -40,6 +40,8 @@ Project Memory is a navigable projection, not a source of truth. The snapshot an
 
 `brain eval` benchmarks deterministic retrieval, context selection, token budgets, and the evidence contract against a versioned, non-sensitive golden corpus. It is offline and reuses one validated snapshot and Project Memory sync for the whole suite.
 
+`brain eval-live` is a separate, explicitly authorized harness for measuring the real provider pipeline. It compares CALL #1 with a golden understanding, measures golden-versus-live retrieval, validates CALL #2 evidence, records provider usage and latency, and emits a human-review artifact. Live observations do not update retrieval weights or the offline baseline.
+
 ## Requirements
 
 - .NET SDK 10
@@ -137,8 +139,35 @@ dotnet run --project src/EngineeringBrain.Cli -- eval . --update-baseline
 
 Normal evaluation never rewrites `evaluations/baseline.json`. Regression thresholds cover critical retrieval decreases, increased test noise, and excessive context growth. Exit code `0` means the golden suite and baseline pass, `3` means an evaluation contract or regression failed, and `1` means execution failed.
 
+## Evaluate the live model pipeline
+
+Inspect the bounded five-case plan without a key or network access:
+
+```powershell
+dotnet run --project src/EngineeringBrain.Cli -- eval-live . --preview
+```
+
+Exercise the complete harness offline with deterministic provider responses:
+
+```powershell
+dotnet run --project src/EngineeringBrain.Cli -- eval-live . --fake-provider
+```
+
+A billable run requires both `OPENAI_API_KEY` and explicit authorization:
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+dotnet run --project src/EngineeringBrain.Cli -- eval-live . --allow-remote
+```
+
+The default plan runs five safe, versioned initiatives with CALL #1 on `gpt-5.6-luna` at low effort and CALL #2 on `gpt-5.6-sol` at medium effort: 10 logical provider calls, with at most one retry per call. `--case <id>` focuses a case and `--runs 1-3` enables explicit repeatability measurement; the hard command limit remains 10 logical calls. The pre-run summary shows cases, runs, models, efforts, maximum input, attempts, authorization, repository, and branch before any provider call.
+
+Results are written outside the repository under `~/.engineering-brain/repositories/<repository-id>/evaluations/live/<run-id>/`. `summary.json` and per-case JSON contain automatic quality, retrieval, evidence, usage, latency, retry, consistency, and security metrics. `review.md` contains the structured outputs and empty 1-5 fields for initiative understanding, architectural relevance, recommendation usefulness, evidence discipline, uncertainty handling, and actionability. Provider errors are redacted, credentials and SDK request objects are never persisted, and optional local pricing can be supplied with `--pricing <pricing.json>`; no prices are built into the product.
+
+Use `eval-live . --preview`, then `eval-live . --fake-provider`, before authorizing a real run. Live evaluation is intended for this repository and its non-sensitive fixture corpus during this iteration; it never sends source bodies, secrets, absolute source paths, or a raw snapshot.
+
 ## Not implemented yet
 
 This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, source-body retrieval, embeddings, semantic/vector search, automatic implementation, a UI, or complete impact analysis. Initiative retrieval is lexical and graph-bounded; it finds integration candidates, not guaranteed implementation locations. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
 
-See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), [the lexical ranking decision](docs/decisions/0007-retrieval-ranking.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
+See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), [the lexical ranking decision](docs/decisions/0007-retrieval-ranking.md), [the live model evaluation decision](docs/decisions/0008-live-model-evaluation.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.

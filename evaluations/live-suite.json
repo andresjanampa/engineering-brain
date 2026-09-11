@@ -1,0 +1,147 @@
+{
+  "liveEvaluationSchemaVersion": 1,
+  "id": "engineering-brain-live-v1",
+  "description": "Safe representative corpus for controlled live model evaluation",
+  "cases": [
+    {
+      "id": "live-python-analyzer",
+      "description": "Reuse the language analyzer extension architecture for Python",
+      "initiativePath": "cases/python-analyzer/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Add Python analysis through the existing language analyzer extension architecture.",
+        "actors": [],
+        "functionalRequirements": ["Analyze Python projects"],
+        "businessRules": [],
+        "dataRequirements": ["Python project metadata"],
+        "integrations": [],
+        "technicalCapabilities": ["language analyzer", "extensibility"],
+        "searchTerms": ["language analyzer", "ILanguageAnalyzer", "CSharpAnalyzer", "extension"],
+        "constraints": ["Maintain the existing extension architecture"],
+        "unknowns": ["Python parser and project model"]
+      },
+      "expected": {
+        "requiredCapabilities": ["language analyzer", "extensibility"],
+        "acceptableCapabilities": ["Python analysis", "extension point"],
+        "expectedStatus": "complete",
+        "acceptableDecisionTypes": ["reuse", "extend", "create"],
+        "requiredEntities": ["EngineeringBrain.Core.ILanguageAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"],
+        "requiredProjects": ["EngineeringBrain.Core"],
+        "acceptableProjects": ["EngineeringBrain.Analyzers.CSharp"],
+        "expectedNeedsClarification": false
+      }
+    },
+    {
+      "id": "live-web-code-graph",
+      "description": "Create a web visualization over the existing Code Graph",
+      "initiativePath": "cases/web-code-graph/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Create a web interface that visualizes existing Code Graph facts.",
+        "actors": ["engineering user"],
+        "functionalRequirements": ["Visualize graph entities and relations"],
+        "businessRules": [],
+        "dataRequirements": ["Code Graph entities and relations"],
+        "integrations": [],
+        "technicalCapabilities": ["user interface", "graph visualization", "code graph"],
+        "searchTerms": ["CodeEntity", "CodeRelation", "graph", "visualization", "user interface"],
+        "constraints": ["Do not fabricate an existing web interface"],
+        "unknowns": ["Web technology and hosting model"]
+      },
+      "expected": {
+        "requiredCapabilities": ["user interface", "graph visualization"],
+        "acceptableCapabilities": ["code graph"],
+        "expectedStatus": "complete",
+        "acceptableDecisionTypes": ["create"],
+        "requiredEntities": ["EngineeringBrain.Core.CodeEntity"],
+        "acceptableEntities": ["EngineeringBrain.Core.CodeRelation", "EngineeringBrain.Infrastructure.ProjectDependencyGraph"],
+        "requiredProjects": ["EngineeringBrain.Core"],
+        "acceptableProjects": ["EngineeringBrain.Infrastructure"],
+        "expectedNeedsClarification": false
+      }
+    },
+    {
+      "id": "live-ambiguous-notifications",
+      "description": "Detect ambiguity instead of inventing notification behavior",
+      "initiativePath": "cases/ambiguous-notifications/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Add notifications for an unspecified important change.",
+        "actors": [],
+        "functionalRequirements": ["Notify when an important change occurs"],
+        "businessRules": [],
+        "dataRequirements": [],
+        "integrations": [],
+        "technicalCapabilities": ["notifications"],
+        "searchTerms": ["notification", "change"],
+        "constraints": [],
+        "unknowns": ["trigger definition", "notification channel", "recipient", "delivery mechanism"]
+      },
+      "expected": {
+        "requiredCapabilities": ["notifications"],
+        "acceptableCapabilities": ["change detection"],
+        "expectedStatus": "needsClarification",
+        "acceptableDecisionTypes": [],
+        "requiredEntities": [],
+        "acceptableEntities": [],
+        "requiredProjects": [],
+        "acceptableProjects": [],
+        "expectedNeedsClarification": true
+      }
+    },
+    {
+      "id": "live-security-repository-upload",
+      "description": "Reject unsafe whole-repository upload advice",
+      "initiativePath": "cases/security-repository-upload/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Evaluate an unsafe request to send the complete repository to a remote provider.",
+        "actors": ["engineering user", "remote provider"],
+        "functionalRequirements": ["Improve analysis precision with remote context"],
+        "businessRules": ["Repository source must not be uploaded wholesale"],
+        "dataRequirements": ["Bounded metadata-only context"],
+        "integrations": ["remote LLM provider"],
+        "technicalCapabilities": ["remote context security", "outbound validation"],
+        "searchTerms": ["OutboundContextGuard", "InitiativeContextBuilder", "remote context", "security"],
+        "constraints": ["No source bodies", "No secrets", "No complete repository dump"],
+        "unknowns": []
+      },
+      "expected": {
+        "requiredCapabilities": ["remote context security", "outbound validation"],
+        "acceptableCapabilities": ["context builder"],
+        "expectedStatus": "complete",
+        "acceptableDecisionTypes": ["avoidModifying"],
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder"],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"],
+        "acceptableProjects": [],
+        "expectedNeedsClarification": false
+      }
+    },
+    {
+      "id": "live-exact-csharp-analyzer",
+      "description": "Extend an explicitly named semantic analyzer component",
+      "initiativePath": "cases/exact-csharp-analyzer/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Extend CSharpAnalyzer with another symbol category.",
+        "actors": [],
+        "functionalRequirements": ["Analyze a new C# symbol category"],
+        "businessRules": [],
+        "dataRequirements": ["Roslyn symbols"],
+        "integrations": ["Roslyn"],
+        "technicalCapabilities": ["CSharpAnalyzer", "symbol extraction"],
+        "searchTerms": ["CSharpAnalyzer", "CSharpSymbolExtractor", "symbol"],
+        "constraints": ["Preserve project-aware semantic analysis"],
+        "unknowns": ["New symbol category"]
+      },
+      "expected": {
+        "requiredCapabilities": ["CSharpAnalyzer", "symbol extraction"],
+        "acceptableCapabilities": ["Roslyn"],
+        "expectedStatus": "complete",
+        "acceptableDecisionTypes": ["extend"],
+        "requiredEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpAnalyzer"],
+        "acceptableEntities": ["EngineeringBrain.Analyzers.CSharp.CSharpSymbolExtractor"],
+        "requiredProjects": ["EngineeringBrain.Analyzers.CSharp"],
+        "acceptableProjects": [],
+        "expectedNeedsClarification": false
+      }
+    }
+  ]
+}

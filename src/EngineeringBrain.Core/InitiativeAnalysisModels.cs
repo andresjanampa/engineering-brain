@@ -158,7 +158,8 @@ public sealed record ReasoningCallUsage(
     int? ActualOutputTokens,
     long DurationMilliseconds,
     int Retries,
-    string? ReasoningEffort = null);
+    string? ReasoningEffort = null,
+    int? ReasoningTokens = null);
 
 public sealed record ReasoningResult<T>(T Value, ReasoningCallUsage Usage);
 

@@ -31,3 +31,7 @@ Keep these rules true as the product evolves:
 - Optimize retrieval ranking without sacrificing bounded candidate counts or recall.
 - Require explicit review before updating an evaluation baseline. A normal evaluation must never auto-accept its results.
 - Keep outbound remote context previewable and auditable without network access.
+- Keep live model evaluation separate from deterministic offline regression evaluation.
+- Require explicit authorization for every billable evaluation command; an available credential is not consent.
+- Diagnose model failures before changing deterministic retrieval behavior.
+- Preserve human review for architectural quality instead of replacing judgment with synthetic metrics.
