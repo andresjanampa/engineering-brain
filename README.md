@@ -4,7 +4,7 @@ Engineering Brain is a local-first engineering intelligence platform. Its goal i
 
 ## Current status
 
-This repository contains the project-aware, incremental MVP foundation and deterministic Project Memory. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
+This repository contains the project-aware, incremental foundation, deterministic Project Memory, and the first evidence-validated initiative-analysis workflow. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
 
 - repository and current Git metadata;
 - discovered files, sizes, and content hashes where safe and reasonable;
@@ -36,12 +36,14 @@ Generated snapshots contain derived metadata, never source file contents. By def
 
 Project Memory is a navigable projection, not a source of truth. The snapshot and code graph always take precedence.
 
+`brain analyze` adds two bounded reasoning stages. The first converts an initiative into structured requirements. Deterministic retrieval then ranks exhaustive snapshot entities and graph relations, builds a compact context from selected Project Memory, and asks a second model for structured architecture recommendations. Every recommendation is subsequently validated against the current repository and branch evidence; invented identities and relations remain explicitly invalid.
+
 ## Requirements
 
 - .NET SDK 10
 - Git available on `PATH` for branch and commit metadata (scanning also works without Git)
 
-No API key, external service, database, container, or network request is required.
+Scanning and Project Memory require no API key, external service, database, container, or network request. Initiative analysis currently supports the OpenAI provider and reads its credential only from `OPENAI_API_KEY`.
 
 ## Build and test
 
@@ -82,8 +84,29 @@ brain memory sync [path]
 
 The first sync initializes `manifest.json`, a root index, an architecture overview, project notes, and bounded top-level component notes. Later syncs compare deterministic source fingerprints, reuse unchanged notes, remove only stale managed notes, and preserve unmanaged files.
 
+## Analyze an initiative
+
+Set the provider credential in the process environment, then explicitly authorize remote reasoning:
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+dotnet run --project src/EngineeringBrain.Cli -- analyze initiative.md --repo . --allow-remote
+```
+
+After publishing or installing:
+
+```powershell
+brain analyze initiative.md --repo . --allow-remote
+```
+
+`--repo` defaults to the current directory. Models can be changed independently with `--interpretation-model` and `--reasoning-model`, or through `ENGINEERING_BRAIN_INTERPRETATION_MODEL` and `ENGINEERING_BRAIN_REASONING_MODEL`. Defaults are `gpt-5.6-luna` and `gpt-5.6-sol`.
+
+The command first refreshes the snapshot and branch-specific Project Memory. Call 1 sends only the initiative text and structural instructions. Call 2 sends the structured understanding, compact repository/Git facts, selected managed notes, relative evidence paths, identities, and selected graph relations. It does not send repository files, source bodies, the complete snapshot, `.env` or configuration contents, credentials, connection strings, or secrets. Responses API storage is disabled. Structured local analysis records are stored outside the repository under the repository and branch identity; they contain the initiative content hash and filename, not its full text.
+
+`--allow-remote` is mandatory and non-interactive so local and CI behavior is explicit. Merely defining `OPENAI_API_KEY` never makes `scan` or `memory sync` use the network.
+
 ## Not implemented yet
 
-This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, impact recommendations, initiative parsing, retrieval, LLM-enriched knowledge, a UI, or any LLM integration. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
+This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, source-body retrieval, embeddings, semantic/vector search, automatic implementation, a UI, or complete impact analysis. Initiative retrieval is lexical and graph-bounded; it finds integration candidates, not guaranteed implementation locations. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
 
-See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
+See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.

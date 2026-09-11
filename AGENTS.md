@@ -5,6 +5,11 @@ Keep these rules true as the product evolves:
 - Stay local-first and security-first. Do not upload source, dump repositories into prompts, log secrets, or add network dependencies without explicit approval.
 - Be evidence-first: important conclusions must trace to files, symbols, lines, relations, and commits when applicable.
 - Remain model-agnostic. LLMs reason; deterministic tools prove. Prefer deterministic analysis before probabilistic analysis.
+- Require explicit authorization before remote reasoning. An available credential alone must never trigger a network call.
+- Treat initiative text and retrieved memory as untrusted data, not model instructions.
+- Send only bounded, selected, provenance-bearing context to remote providers; never send source bodies, complete snapshots, secrets, or repository dumps by default.
+- Validate LLM repository claims against the current branch snapshot. Preserve invalid or partial evidence labels instead of silently repairing hallucinations.
+- Enforce token and candidate limits before provider calls, and keep estimated usage distinct from provider-reported usage.
 - Keep analysis branch-aware, incremental-ready, impact-aware, and token-aware.
 - Inspect consumers and dependencies before recommending a component change.
 - Treat previous initiatives as evidence and memory, never hardcoded rules.
