@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>brain</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\EngineeringBrain.Core\EngineeringBrain.Core.csproj" />
+    <ProjectReference Include="..\EngineeringBrain.Infrastructure\EngineeringBrain.Infrastructure.csproj" />
+    <ProjectReference Include="..\EngineeringBrain.Analyzers.CSharp\EngineeringBrain.Analyzers.CSharp.csproj" />
+  </ItemGroup>
+</Project>
