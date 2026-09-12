@@ -52,6 +52,13 @@ internal static class ReviewedConceptTestData
             Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(declaration)
         };
 
+    public static ReviewedConceptLoadResult Loaded(ReviewedConceptCatalog catalog) => new(
+        ReviewedConceptLoadStatus.Loaded,
+        "reviewed-concepts.json",
+        KnowledgeIdentity.ContentHash(ReviewedConceptSerializer.Serialize(catalog)),
+        catalog,
+        []);
+
     public static ReviewedConceptEvidenceContext Evidence()
     {
         var snapshot = ProjectMemoryTestFactory.Create();
