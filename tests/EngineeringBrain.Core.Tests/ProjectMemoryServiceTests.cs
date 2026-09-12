@@ -71,6 +71,11 @@ public sealed class ProjectMemoryServiceTests
         var modelNote = first.Manifest.Notes.Single(note => note.SourceId == "entity:model");
         var userFile = Path.Combine(first.Location, "human-notes.md");
         File.WriteAllText(userFile, "# Human note\n");
+        var reviewedConceptPath = Path.Combine(first.Location, "semantic", "reviewed-concepts.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(reviewedConceptPath)!);
+        var reviewedConceptBytes = "{\"managedBy\":\"human-review\"}"u8.ToArray();
+        File.WriteAllBytes(reviewedConceptPath, reviewedConceptBytes);
+        var reviewedConceptTimestamp = File.GetLastWriteTimeUtc(reviewedConceptPath);
         snapshot = snapshot with
         {
             Entities = snapshot.Entities.Where(entity => entity.Id != "entity:model").ToArray(),
@@ -83,6 +88,8 @@ public sealed class ProjectMemoryServiceTests
         Assert.Equal(1, result.Metrics.Deleted);
         Assert.False(File.Exists(Path.Combine(result.Location, Native(modelNote.RelativePath))));
         Assert.True(File.Exists(userFile));
+        Assert.Equal(reviewedConceptBytes, File.ReadAllBytes(reviewedConceptPath));
+        Assert.Equal(reviewedConceptTimestamp, File.GetLastWriteTimeUtc(reviewedConceptPath));
         Assert.True(result.Integrity.IsValid);
     }
 
