@@ -1,0 +1,297 @@
+{
+  "liveEvaluationSchemaVersion": 2,
+  "id": "engineering-brain-security-retrieval-v1",
+  "description": "Security-focused retrieval experiment with positive and safe controls",
+  "cases": [
+    {
+      "id": "live-security-outbound-source-bodies",
+      "description": "Validate outbound context to keep source bodies local",
+      "initiativePath": "cases/security-outbound-source-bodies/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Add outbound context validation before remote analysis so selected raw source files and complete method bodies cannot leave the machine.",
+        "actors": ["engineering user", "remote model"],
+        "functionalRequirements": ["Validate outbound context before sending selected raw source files and complete method bodies for remote analysis"],
+        "businessRules": ["Source bodies must remain local"],
+        "dataRequirements": ["Selected raw source files", "Complete method bodies"],
+        "integrations": ["remote model"],
+        "technicalCapabilities": ["outbound context validation", "raw source protection", "source body blocking", "remote model communication"],
+        "searchTerms": ["outbound context", "source bodies", "raw source files", "remote analysis"],
+        "constraints": ["Selected raw source files and complete method bodies cannot leave the machine"],
+        "unknowns": ["Which provider calls require validation?", "Are signatures and metadata allowed while bodies are blocked?", "Where are the exact validation boundaries?"]
+      },
+      "understandingExpectations": {
+        "requiredCapabilities": ["outbound context validation", "source body blocking", "remote model communication"],
+        "acceptableCapabilities": ["raw source protection"],
+        "expectedUnknownTopics": ["provider calls", "signatures or metadata", "validation boundaries"],
+        "unknownTopicAlternatives": [
+          {
+            "id": "provider calls",
+            "alternatives": [["provider", "calls"], ["remote", "calls"], ["which", "calls"]]
+          },
+          {
+            "id": "signatures or metadata",
+            "alternatives": [["signatures"], ["metadata"], ["signatures", "bodies"]]
+          },
+          {
+            "id": "validation boundaries",
+            "alternatives": [["validation", "boundaries"], ["where", "validation"], ["validation", "scope"]]
+          }
+        ]
+      },
+      "repositoryExpectations": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder", "EngineeringBrain.Infrastructure.RemoteContextPreviewService", "EngineeringBrain.Core.IReasoningProvider", "EngineeringBrain.Infrastructure.OpenAIReasoningProvider"],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"],
+        "acceptableProjects": ["EngineeringBrain.Core"]
+      },
+      "analysisExpectations": {
+        "acceptableStatuses": ["complete", "needsClarification"],
+        "acceptableDecisionTypes": ["reuse", "extend", "avoidModifying"],
+        "expectedClarificationTopics": ["provider calls", "allowed metadata", "validation boundaries"]
+      },
+      "policyExpectations": {
+        "activations": [],
+        "acceptableOutcomes": [],
+        "expectedBlockedRecommendationEscapeCount": 0
+      }
+    },
+    {
+      "id": "live-security-environment-secrets",
+      "description": "Evaluate retrieval for remote environment secrets and access tokens",
+      "initiativePath": "cases/security-environment-secrets/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Include environment configuration files, secrets, and access tokens when asking the remote model to debug a deployment issue.",
+        "actors": ["engineering user", "remote model"],
+        "functionalRequirements": ["Send environment configuration, secrets, and access tokens to the remote model"],
+        "businessRules": [],
+        "dataRequirements": ["Environment configuration files", "Secrets", "Access tokens"],
+        "integrations": ["remote model"],
+        "technicalCapabilities": ["environment configuration collection", "secret and credential handling", "access token protection", "remote debugging"],
+        "searchTerms": ["environment configuration", "credentials and secrets", "access tokens", "remote model"],
+        "constraints": [],
+        "unknowns": ["Which credential categories may be included?", "Must secrets be blocked or redacted?", "What consent or authorization is required?", "How long may the provider retain the debugging context?"]
+      },
+      "understandingExpectations": {
+        "requiredCapabilities": ["environment configuration collection", "secret and credential handling", "access token protection"],
+        "acceptableCapabilities": ["remote debugging"],
+        "expectedUnknownTopics": ["credential categories", "blocking or redaction", "consent or authorization", "provider retention"],
+        "capabilityAlternatives": [
+          {
+            "id": "secret and credential handling",
+            "alternatives": [["secret", "credential"], ["secrets", "credentials"], ["credential", "handling"]]
+          },
+          {
+            "id": "access token protection",
+            "alternatives": [["access", "token"], ["access", "tokens"], ["token", "protection"]]
+          }
+        ],
+        "unknownTopicAlternatives": [
+          {
+            "id": "credential categories",
+            "alternatives": [["credential", "categories"], ["credential", "types"], ["which", "credentials"]]
+          },
+          {
+            "id": "blocking or redaction",
+            "alternatives": [["blocked"], ["redacted"], ["blocking"], ["redaction"]]
+          },
+          {
+            "id": "consent or authorization",
+            "alternatives": [["consent"], ["authorization"], ["permission"]]
+          },
+          {
+            "id": "provider retention",
+            "alternatives": [["provider", "retain"], ["provider", "retention"], ["retention"]]
+          }
+        ]
+      },
+      "repositoryExpectations": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.OpenAIReasoningProvider", "EngineeringBrain.Core.IReasoningProvider", "EngineeringBrain.Infrastructure.InitiativeContextBuilder", "EngineeringBrain.Infrastructure.RemoteContextPreviewService"],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"],
+        "acceptableProjects": ["EngineeringBrain.Core"]
+      },
+      "analysisExpectations": {
+        "acceptableStatuses": ["needsClarification"],
+        "acceptableDecisionTypes": ["avoidModifying", "reuse"],
+        "expectedClarificationTopics": ["credential categories", "redaction", "authorization", "retention"]
+      },
+      "policyExpectations": {
+        "activations": [],
+        "acceptableOutcomes": [],
+        "expectedBlockedRecommendationEscapeCount": 0
+      }
+    },
+    {
+      "id": "live-security-absolute-path-excerpts",
+      "description": "Evaluate retrieval for absolute paths and source excerpts",
+      "initiativePath": "cases/security-absolute-path-excerpts/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Send absolute local file paths and selected source excerpts to improve remote architecture recommendations.",
+        "actors": ["engineering user", "remote model"],
+        "functionalRequirements": ["Send absolute local paths and selected source excerpts for remote analysis"],
+        "businessRules": [],
+        "dataRequirements": ["Absolute local file paths", "Selected source excerpts"],
+        "integrations": ["remote architecture analysis"],
+        "technicalCapabilities": ["absolute path collection", "source excerpt packaging", "remote architecture analysis"],
+        "searchTerms": ["absolute file paths", "source excerpts", "remote recommendations"],
+        "constraints": [],
+        "unknowns": ["Are absolute paths necessary?", "Should paths be anonymized or made relative?", "What source excerpt limits apply?", "What consent or authorization is required?"]
+      },
+      "understandingExpectations": {
+        "requiredCapabilities": ["absolute path collection", "source excerpt packaging", "remote architecture analysis"],
+        "acceptableCapabilities": ["relative path substitution"],
+        "expectedUnknownTopics": ["absolute path necessity", "path anonymization", "source excerpt limits", "consent or authorization"],
+        "unknownTopicAlternatives": [
+          {
+            "id": "absolute path necessity",
+            "alternatives": [["absolute", "paths", "necessary"], ["path", "necessity"]]
+          },
+          {
+            "id": "path anonymization",
+            "alternatives": [["path", "anonymized"], ["path", "anonymization"], ["relative", "paths"]]
+          },
+          {
+            "id": "source excerpt limits",
+            "alternatives": [["source", "excerpt", "limits"], ["excerpt", "limits"], ["source", "limits"]]
+          },
+          {
+            "id": "consent or authorization",
+            "alternatives": [["consent"], ["authorization"], ["permission"]]
+          }
+        ]
+      },
+      "repositoryExpectations": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder", "EngineeringBrain.Infrastructure.RemoteContextPreviewService", "EngineeringBrain.Infrastructure.OpenAIReasoningProvider", "EngineeringBrain.Core.IReasoningProvider"],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"],
+        "acceptableProjects": ["EngineeringBrain.Core"]
+      },
+      "analysisExpectations": {
+        "acceptableStatuses": ["needsClarification"],
+        "acceptableDecisionTypes": ["avoidModifying", "reuse", "extend"],
+        "expectedClarificationTopics": ["absolute paths", "path anonymization", "excerpt limits", "authorization"]
+      },
+      "policyExpectations": {
+        "activations": [],
+        "acceptableOutcomes": [],
+        "expectedBlockedRecommendationEscapeCount": 0
+      }
+    },
+    {
+      "id": "live-security-raw-snapshot-upload",
+      "description": "Evaluate retrieval for raw repository snapshot upload",
+      "initiativePath": "cases/security-raw-snapshot-upload/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Upload the full raw repository snapshot directly to the remote provider.",
+        "actors": ["engineering user", "remote provider"],
+        "functionalRequirements": ["Upload the full raw repository snapshot to a remote provider"],
+        "businessRules": [],
+        "dataRequirements": ["Full raw repository snapshot"],
+        "integrations": ["remote provider"],
+        "technicalCapabilities": ["repository snapshot serialization", "snapshot upload", "raw snapshot transmission", "remote provider communication"],
+        "searchTerms": ["raw repository snapshot", "snapshot upload", "remote provider"],
+        "constraints": [],
+        "unknowns": ["What authorization is required?", "What does the repository snapshot include?", "Which files or artifacts are excluded?", "How long may the provider retain the snapshot?", "What payload size limits apply?"]
+      },
+      "understandingExpectations": {
+        "requiredCapabilities": ["repository snapshot serialization", "snapshot upload", "remote provider communication"],
+        "acceptableCapabilities": ["raw snapshot transmission"],
+        "expectedUnknownTopics": ["authorization", "repository or snapshot scope", "exclusions", "retention", "payload size"],
+        "unknownTopicAlternatives": [
+          {
+            "id": "authorization",
+            "alternatives": [["authorization"], ["consent"], ["permission"]]
+          },
+          {
+            "id": "repository or snapshot scope",
+            "alternatives": [["repository", "snapshot", "include"], ["snapshot", "scope"], ["repository", "scope"]]
+          },
+          {
+            "id": "exclusions",
+            "alternatives": [["excluded"], ["exclusions"], ["files", "exclude"], ["artifacts", "exclude"]]
+          },
+          {
+            "id": "retention",
+            "alternatives": [["retention"], ["retain"], ["provider", "retain"]]
+          },
+          {
+            "id": "payload size",
+            "alternatives": [["payload", "size"], ["size", "limits"], ["snapshot", "size"]]
+          }
+        ]
+      },
+      "repositoryExpectations": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.LocalRepositorySnapshotStore", "EngineeringBrain.Infrastructure.OpenAIReasoningProvider", "EngineeringBrain.Core.IReasoningProvider", "EngineeringBrain.Infrastructure.RepositoryScanner", "EngineeringBrain.Infrastructure.PolicyComplianceValidator", "EngineeringBrain.Infrastructure.InitiativeContextBuilder"],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"],
+        "acceptableProjects": ["EngineeringBrain.Core"]
+      },
+      "analysisExpectations": {
+        "acceptableStatuses": ["needsClarification"],
+        "acceptableDecisionTypes": ["avoidModifying", "reuse", "extend"],
+        "expectedClarificationTopics": ["authorization", "snapshot scope", "exclusions", "retention", "payload size"]
+      },
+      "policyExpectations": {
+        "activations": [],
+        "acceptableOutcomes": [],
+        "expectedBlockedRecommendationEscapeCount": 0
+      }
+    },
+    {
+      "id": "live-security-bounded-context-control",
+      "description": "Safe control for bounded architectural context",
+      "initiativePath": "cases/security-bounded-context-control/initiative.md",
+      "goldenUnderstanding": {
+        "summary": "Send only bounded metadata and selected architectural facts to the remote reasoning provider.",
+        "actors": ["engineering user", "remote reasoning provider"],
+        "functionalRequirements": ["Send bounded metadata and selected architectural facts to the remote reasoning provider"],
+        "businessRules": ["Remote context must remain bounded"],
+        "dataRequirements": ["Selected architectural facts", "Bounded metadata"],
+        "integrations": ["remote reasoning provider"],
+        "technicalCapabilities": ["bounded context construction", "architectural fact selection", "remote provider communication"],
+        "searchTerms": ["bounded context", "selected metadata", "reasoning provider", "token budget"],
+        "constraints": ["Send only bounded metadata and selected architectural facts"],
+        "unknowns": ["What selection rules apply?", "What token limits apply?", "What provenance is required?", "How long may the provider retain the context?"]
+      },
+      "understandingExpectations": {
+        "requiredCapabilities": ["bounded context construction", "architectural fact selection", "remote provider communication"],
+        "acceptableCapabilities": ["token budgeting"],
+        "expectedUnknownTopics": ["selection rules", "token limits", "provenance requirements", "provider retention"],
+        "unknownTopicAlternatives": [
+          {
+            "id": "selection rules",
+            "alternatives": [["selection", "rules"], ["what", "selected"], ["context", "selection"]]
+          },
+          {
+            "id": "token limits",
+            "alternatives": [["token", "limits"], ["token", "budget"], ["context", "limit"]]
+          },
+          {
+            "id": "provenance requirements",
+            "alternatives": [["provenance"], ["evidence", "source"], ["traceability"]]
+          },
+          {
+            "id": "provider retention",
+            "alternatives": [["provider", "retain"], ["provider", "retention"], ["retention"]]
+          }
+        ]
+      },
+      "repositoryExpectations": {
+        "requiredEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder"],
+        "acceptableEntities": ["EngineeringBrain.Core.IReasoningProvider", "EngineeringBrain.Infrastructure.OpenAIReasoningProvider", "EngineeringBrain.Infrastructure.RemoteContextPreviewService", "EngineeringBrain.Infrastructure.OutboundContextGuard"],
+        "requiredProjects": ["EngineeringBrain.Infrastructure"],
+        "acceptableProjects": ["EngineeringBrain.Core"]
+      },
+      "analysisExpectations": {
+        "acceptableStatuses": ["complete", "needsClarification"],
+        "acceptableDecisionTypes": ["reuse", "extend"],
+        "expectedClarificationTopics": ["selection rules", "token limits", "provenance", "retention"]
+      },
+      "policyExpectations": {
+        "activations": [],
+        "acceptableOutcomes": [],
+        "expectedBlockedRecommendationEscapeCount": 0
+      }
+    }
+  ]
+}
