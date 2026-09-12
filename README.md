@@ -4,7 +4,7 @@ Engineering Brain is a local-first engineering intelligence platform. Its goal i
 
 ## Current status
 
-This repository contains the project-aware, incremental MVP foundation. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
+This repository contains the project-aware, incremental MVP foundation and deterministic Project Memory. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
 
 - repository and current Git metadata;
 - discovered files, sizes, and content hashes where safe and reasonable;
@@ -27,6 +27,14 @@ Generated snapshots contain derived metadata, never source file contents. By def
 ```text
 ~/.engineering-brain/repositories/<repository-id>/snapshots/latest.json
 ```
+
+`brain memory sync` first ensures that snapshot is current, then derives compact Markdown knowledge from the validated graph. Knowledge is isolated by repository and branch, carries source provenance and stable fingerprints, and is only rewritten when its relevant source facts change. Generated notes live outside the analyzed repository at:
+
+```text
+~/.engineering-brain/repositories/<repository-id>/knowledge/branches/<branch-key>/
+```
+
+Project Memory is a navigable projection, not a source of truth. The snapshot and code graph always take precedence.
 
 ## Requirements
 
@@ -58,8 +66,24 @@ brain scan [path]
 
 When `path` is omitted, the current directory is used. When invoked inside a Git working tree, the scanner resolves the repository root before analysis.
 
+## Synchronize Project Memory
+
+During development:
+
+```powershell
+dotnet run --project src/EngineeringBrain.Cli -- memory sync .
+```
+
+After publishing or installing the executable as `brain`:
+
+```powershell
+brain memory sync [path]
+```
+
+The first sync initializes `manifest.json`, a root index, an architecture overview, project notes, and bounded top-level component notes. Later syncs compare deterministic source fingerprints, reuse unchanged notes, remove only stale managed notes, and preserve unmanaged files.
+
 ## Not implemented yet
 
-This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, impact recommendations, initiative parsing, retrieval, project-memory generation, a UI, or any LLM integration. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
+This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, impact recommendations, initiative parsing, retrieval, LLM-enriched knowledge, a UI, or any LLM integration. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
 
-See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
+See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.

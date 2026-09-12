@@ -9,6 +9,10 @@ Keep these rules true as the product evolves:
 - Inspect consumers and dependencies before recommending a component change.
 - Treat previous initiatives as evidence and memory, never hardcoded rules.
 - Keep the code graph (objective extracted facts) separate from project memory (derived knowledge and decisions).
+- Deterministic project memory never outranks source code or the validated snapshot.
+- Require provenance for every generated knowledge note.
+- Never overwrite or delete unmanaged knowledge.
+- Do not rewrite stable generated knowledge when its relevant source facts are unchanged.
 - Do not fabricate relationships. Missing data is better than false certainty.
 - Prefer semantic evidence over string matching. Never claim semantic resolution when project loading is incomplete or ambiguous.
 - Degrade gracefully per project. Clearly labeled partial and syntax-fallback results remain valid; one broken project must not invalidate healthy projects.
