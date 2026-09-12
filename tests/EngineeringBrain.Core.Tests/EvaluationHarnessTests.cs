@@ -6,6 +6,28 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class EvaluationHarnessTests
 {
     [Fact]
+    public async Task ReviewedConceptResolution_AppliesPromotionWhileExistingOverloadRemainsLexicalOnly()
+    {
+        var concepts = ReviewedConceptTestData.Resolution(
+            ReviewedConceptTestData.Profile(
+                "entity:business-service",
+                ReviewedConceptTestData.Concept("business-analyzer")));
+
+        var lexical = await EvaluateAsync(
+            Expected(required: ["Demo.Business.BusinessService"]),
+            "business analyzer");
+        var semantic = await EvaluateAsync(
+            Expected(required: ["Demo.Business.BusinessService"]),
+            "business analyzer",
+            concepts: concepts);
+
+        Assert.DoesNotContain(lexical.TopComponents.SelectMany(item => item.MatchReasons),
+            item => item.Signal == "reviewed concept");
+        Assert.Contains(semantic.TopComponents.SelectMany(item => item.MatchReasons),
+            item => item.Signal == "reviewed concept");
+    }
+
+    [Fact]
     public async Task RequiredEntityHit_PassesRetrievalContract()
     {
         var result = await EvaluateAsync(Expected(required: ["Demo.Business.BusinessService"]), "BusinessService");
@@ -78,7 +100,8 @@ public sealed class EvaluationHarnessTests
     private static async Task<EvaluationCaseResult> EvaluateAsync(
         EvaluationExpectations expected,
         string term,
-        RepositorySnapshot? snapshot = null)
+        RepositorySnapshot? snapshot = null,
+        ReviewedConceptResolutionResult? concepts = null)
     {
         using var fixture = new InitiativeMemoryFixture();
         var memory = await fixture.CreateMemoryAsync(snapshot);
@@ -90,7 +113,11 @@ public sealed class EvaluationHarnessTests
             var item = new EvaluationCase("case", "case", "initiative.md", ["unit"], EvaluationSplit.Tuning,
                 InitiativeAnalysisTestData.Understanding(term), expected);
             var suite = new EvaluationSuite(1, "suite", "suite", [item]);
-            return Assert.Single(await new EvaluationHarness().EvaluateAsync(suite, Path.Combine(suiteRoot, "suite.json"), memory));
+            var harness = new EvaluationHarness();
+            var results = concepts is null
+                ? await harness.EvaluateAsync(suite, Path.Combine(suiteRoot, "suite.json"), memory)
+                : await harness.EvaluateAsync(suite, Path.Combine(suiteRoot, "suite.json"), memory, concepts);
+            return Assert.Single(results);
         }
         finally { Directory.Delete(suiteRoot, true); }
     }

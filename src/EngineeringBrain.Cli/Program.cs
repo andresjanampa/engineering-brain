@@ -308,8 +308,15 @@ internal static class BrainCli
             var suite = await serializer.LoadAsync(suitePath, cancellation.Token);
             var scan = await AnalyzeRepositoryAsync(repositoryPath, cancellation.Token);
             var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            var reviewedConcepts = await ResolveReviewedConceptsAsync(memory, cancellation.Token);
+            WriteReviewedConceptDiagnostics(reviewedConcepts);
             var harness = new EvaluationHarness();
-            var cases = await harness.EvaluateAsync(suite, suitePath, memory, cancellation.Token);
+            var cases = await harness.EvaluateAsync(
+                suite,
+                suitePath,
+                memory,
+                reviewedConcepts,
+                cancellation.Token);
             var splits = EvaluationHarness.Grouped(cases);
             var aggregate = splits.All;
             var baselinePath = Path.Combine(Path.GetDirectoryName(suitePath)!, "baseline.json");
@@ -397,6 +404,9 @@ internal static class BrainCli
                 interpretationEffort, analysisEffort);
             if (options.Preview) return 0;
 
+            var reviewedConcepts = await ResolveReviewedConceptsAsync(memory, cancellation.Token);
+            WriteReviewedConceptDiagnostics(reviewedConcepts);
+
             LivePricingCatalog? pricing = options.PricingPath is null
                 ? null
                 : await LivePricingCatalogLoader.LoadAsync(options.PricingPath, cancellation.Token);
@@ -405,7 +415,7 @@ internal static class BrainCli
                 ? new FakeLiveReasoningProvider(item, memory.SourceSnapshot, runNumber, interpretationEffort, analysisEffort)
                 : new OpenAIReasoningProvider(apiKey!, providerOptions);
             var result = await new LiveEvaluationService().RunAsync(
-                plan, suitePath, memory, providerName, Factory,
+                plan, suitePath, memory, reviewedConcepts, providerName, Factory,
                 options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, pricing, cancellation.Token);
             WriteLiveEvaluation(result);

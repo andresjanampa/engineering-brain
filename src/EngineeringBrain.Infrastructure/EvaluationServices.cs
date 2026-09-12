@@ -190,7 +190,7 @@ public sealed class EvaluationBaselineComparer
 
 public sealed class EvaluationHarness
 {
-    public const string RetrievalVersion = "lexical-graph-v2";
+    public const string RetrievalVersion = "lexical-graph-concept-v1";
     private readonly InitiativeCandidateRetriever _retriever;
     private readonly InitiativeContextBuilder _contextBuilder;
     private readonly AnalysisEvidenceValidator _validator;
@@ -215,8 +215,21 @@ public sealed class EvaluationHarness
         EvaluationSuite suite,
         string suitePath,
         ProjectMemorySyncResult memory,
+        CancellationToken cancellationToken = default) => await EvaluateAsync(
+        suite,
+        suitePath,
+        memory,
+        ReviewedConceptResolutionResult.Absent,
+        cancellationToken);
+
+    public async Task<IReadOnlyList<EvaluationCaseResult>> EvaluateAsync(
+        EvaluationSuite suite,
+        string suitePath,
+        ProjectMemorySyncResult memory,
+        ReviewedConceptResolutionResult reviewedConcepts,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(reviewedConcepts);
         var root = Path.GetDirectoryName(Path.GetFullPath(suitePath))!;
         var results = new List<EvaluationCaseResult>();
         foreach (var item in suite.Cases)
@@ -224,7 +237,11 @@ public sealed class EvaluationHarness
             cancellationToken.ThrowIfCancellationRequested();
             var initiative = await File.ReadAllTextAsync(
                 EvaluationSuiteSerializer.ResolveWithin(root, item.InitiativePath), cancellationToken);
-            var retrieval = _retriever.Retrieve(item.Understanding, memory.Manifest, memory.SourceSnapshot);
+            var retrieval = _retriever.Retrieve(
+                item.Understanding,
+                memory.Manifest,
+                memory.SourceSnapshot,
+                reviewedConcepts.Profiles);
             var context = await _contextBuilder.BuildAsync(item.Understanding, retrieval, memory, cancellationToken);
             var analysis = CreateGoldenAnalysis(item, memory.SourceSnapshot);
             var validated = _validator.Validate(analysis, memory.SourceSnapshot);

@@ -7,6 +7,42 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class LiveEvaluationTests
 {
     [Fact]
+    public async Task RunAsync_UsesSameReviewedProfilesForGoldenAndLiveRetrieval()
+    {
+        var item = Case("concept") with
+        {
+            GoldenUnderstanding = Understanding("business analyzer")
+        };
+        using var fixture = await Fixture.CreateAsync([item]);
+        var concepts = ReviewedConceptTestData.Resolution(
+            ReviewedConceptTestData.Profile(
+                "entity:business-service",
+                ReviewedConceptTestData.Concept("business-analyzer")));
+        var service = new LiveEvaluationService(
+            store: new LocalLiveEvaluationStore(Path.Combine(fixture.Root, "concept-data")),
+            clock: () => new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero));
+
+        var result = await service.RunAsync(
+            LiveEvaluationPlanner.Create(fixture.Suite),
+            fixture.SuitePath,
+            fixture.Memory,
+            concepts,
+            "Fake",
+            FakeFactory(fixture),
+            "model-a",
+            "model-b",
+            "low",
+            "medium");
+
+        var caseResult = Assert.Single(result.Cases);
+        var reason = Assert.Single(
+            caseResult.Retrieval!.Components.Single(value => value.EntityId == "entity:business-service").MatchReasons,
+            value => value.Signal == "reviewed concept");
+        Assert.Contains("business-analyzer@", reason.MatchedValue, StringComparison.Ordinal);
+        Assert.Equal(caseResult.RetrievalComparison!.Golden, caseResult.RetrievalComparison.Actual);
+    }
+
+    [Fact]
     public async Task LiveSuite_LoadsFiveSafeCases()
     {
         var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(FindRepositoryFile("evaluations", "live-suite.json"));
