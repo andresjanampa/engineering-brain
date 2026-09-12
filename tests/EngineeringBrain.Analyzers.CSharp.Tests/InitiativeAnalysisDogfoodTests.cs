@@ -40,7 +40,9 @@ public sealed class InitiativeAnalysisDogfoodTests
             Assert.Contains(result.Retrieval.Components, candidate => candidate.Name == "CSharpAnalyzer");
             Assert.Contains(result.Retrieval.Projects, candidate =>
                 candidate.RelativePath.Contains("EngineeringBrain.Analyzers.CSharp", StringComparison.Ordinal));
-            Assert.Equal(EvidenceValidationStatus.Validated, Assert.Single(result.Recommendations).ValidationStatus);
+            Assert.Equal(
+                EvidenceValidationStatus.Validated,
+                Assert.Single(result.Recommendations).ValidatedRecommendation.ValidationStatus);
             Assert.DoesNotContain("public class", provider.Requests[1].UserData, StringComparison.Ordinal);
 
             Console.WriteLine($"Initiative: {initiative}");
@@ -58,7 +60,10 @@ public sealed class InitiativeAnalysisDogfoodTests
 
             Console.WriteLine($"Context estimated tokens: {result.Context.EstimatedTokens}");
             Console.WriteLine($"Analysis: {result.Analysis.Summary}; status={result.Analysis.Status}");
-            Console.WriteLine($"Recommendation: {result.Recommendations[0].Recommendation.Decision}; evidence={result.Recommendations[0].ValidationStatus}");
+            Console.WriteLine(
+                $"Recommendation: {result.Recommendations[0].ValidatedRecommendation.Recommendation.Decision}; "
+                + $"evidence={result.Recommendations[0].ValidatedRecommendation.ValidationStatus}; "
+                + $"policy={result.PolicyOutcome}; disposition={result.Recommendations[0].Disposition}");
         }
         finally
         {
@@ -142,7 +147,8 @@ public sealed class InitiativeAnalysisDogfoodTests
                 EpistemicStatus.Inference,
                 [evidence],
                 ["Known impact is limited to selected graph relations."],
-                ["Python parser implementation is not known."]);
+                ["Python parser implementation is not known."],
+                []);
             return new InitiativeAnalysis(
                 InitiativeAnalysisStatus.Complete,
                 "Extend the existing language analyzer architecture.",

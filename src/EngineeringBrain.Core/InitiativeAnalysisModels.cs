@@ -44,6 +44,78 @@ public enum EvidenceValidationStatus
     Proposal
 }
 
+public enum PolicyActionOperation
+{
+    RemoteTransmission,
+    ModifyComponent,
+    CreateExternalIntegration,
+    Other
+}
+
+public enum PolicyActionBoundary
+{
+    Local,
+    Remote,
+    None,
+    Unknown
+}
+
+public enum PolicyContentScope
+{
+    None,
+    BoundedFacts,
+    SourceBodies,
+    RawSnapshot,
+    CompleteRepository,
+    Secrets,
+    AbsoluteLocalPaths,
+    Unknown
+}
+
+public enum PolicyAuthorizationMode
+{
+    NotApplicable,
+    Explicit,
+    Automatic,
+    None,
+    Unknown
+}
+
+public enum PolicySourceKind
+{
+    System,
+    Project
+}
+
+public enum PolicySeverity
+{
+    Block,
+    Warn
+}
+
+public enum PolicyComplianceStatus
+{
+    Compliant,
+    Violated,
+    NotApplicable,
+    Unknown
+}
+
+public enum RecommendationDisposition
+{
+    Accepted,
+    NeedsReview,
+    Rejected
+}
+
+public enum PolicyOutcome
+{
+    Allowed,
+    Warning,
+    Blocked,
+    Unknown
+}
+
 public enum ContextSegmentKind
 {
     InitiativeUnderstanding,
@@ -83,6 +155,14 @@ public sealed record EvidenceReference(
     int? EndLine,
     ResolutionLevel? ResolutionLevel);
 
+public sealed record PolicyRelevantAction(
+    PolicyActionOperation Operation,
+    PolicyActionBoundary Boundary,
+    PolicyContentScope ContentScope,
+    PolicyAuthorizationMode Authorization,
+    string? TargetEntityId,
+    string? TargetProjectId);
+
 public sealed record AnalysisRecommendation(
     RecommendationDecision Decision,
     string Subject,
@@ -90,7 +170,8 @@ public sealed record AnalysisRecommendation(
     EpistemicStatus EpistemicStatus,
     IReadOnlyList<EvidenceReference> Evidence,
     IReadOnlyList<string> PotentialImpact,
-    IReadOnlyList<string> Unknowns);
+    IReadOnlyList<string> Unknowns,
+    IReadOnlyList<PolicyRelevantAction> PolicyRelevantActions);
 
 public sealed record InitiativeAnalysis(
     InitiativeAnalysisStatus Status,
@@ -184,6 +265,33 @@ public sealed record ValidatedRecommendation(
     IReadOnlyList<EvidenceReference> ValidEvidence,
     IReadOnlyList<string> ValidationDiagnostics);
 
+public sealed record PolicyProvenance(
+    string Authority,
+    string SourceReference,
+    string? RepositoryId,
+    string? Branch,
+    string? Commit,
+    string? RelativePath,
+    string? ContentHash);
+
+public sealed record PolicyComplianceResult(
+    string PolicyId,
+    int PolicyVersion,
+    PolicySourceKind Source,
+    PolicySeverity Severity,
+    PolicyComplianceStatus ComplianceStatus,
+    string Diagnostic,
+    PolicyProvenance Provenance);
+
+public sealed record GovernedRecommendation(
+    ValidatedRecommendation ValidatedRecommendation,
+    IReadOnlyList<PolicyComplianceResult> PolicyResults,
+    RecommendationDisposition Disposition);
+
+public sealed record PolicyGovernanceResult(
+    IReadOnlyList<GovernedRecommendation> Recommendations,
+    PolicyOutcome Outcome);
+
 public sealed record InitiativeAnalysisUsage(
     IReadOnlyList<ReasoningCallUsage> Calls,
     int EstimatedInputTokens,
@@ -201,7 +309,8 @@ public sealed record InitiativeAnalysisResult(
     CandidateRetrievalResult Retrieval,
     InitiativeContext Context,
     InitiativeAnalysis Analysis,
-    IReadOnlyList<ValidatedRecommendation> Recommendations,
+    IReadOnlyList<GovernedRecommendation> Recommendations,
+    PolicyOutcome PolicyOutcome,
     InitiativeAnalysisUsage Usage,
     string? SavedAnalysisPath);
 

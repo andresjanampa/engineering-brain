@@ -19,11 +19,14 @@ public sealed record PersistedInitiativeAnalysis(
     int ContextEstimatedTokens,
     IReadOnlyList<string> IncludedNotePaths,
     InitiativeAnalysis Analysis,
-    IReadOnlyList<ValidatedRecommendation> Recommendations,
+    IReadOnlyList<GovernedRecommendation> Recommendations,
+    PolicyOutcome PolicyOutcome,
     InitiativeAnalysisUsage Usage);
 
 public sealed class LocalInitiativeAnalysisStore
 {
+    public const int CurrentSchemaVersion = 2;
+
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
     private readonly string _dataRoot;
 
@@ -54,7 +57,7 @@ public sealed class LocalInitiativeAnalysisStore
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"{result.AnalysisId}.json");
         var stored = new PersistedInitiativeAnalysis(
-            1,
+            CurrentSchemaVersion,
             result.AnalysisId,
             DateTimeOffset.UtcNow,
             result.InitiativeFileName,
@@ -67,6 +70,7 @@ public sealed class LocalInitiativeAnalysisStore
             result.Context.IncludedNotePaths,
             result.Analysis,
             result.Recommendations,
+            result.PolicyOutcome,
             result.Usage);
         var json = JsonSerializer.Serialize(stored, JsonOptions).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
         var temporary = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
@@ -84,6 +88,29 @@ public sealed class LocalInitiativeAnalysisStore
         }
 
         return path;
+    }
+
+    public async Task<PersistedInitiativeAnalysis> LoadAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await File.ReadAllTextAsync(path, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion)
+            || schemaVersion.ValueKind != JsonValueKind.Number
+            || !schemaVersion.TryGetInt32(out var version))
+        {
+            throw new InvalidDataException("Initiative analysis does not declare a valid schemaVersion.");
+        }
+
+        if (version != CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"Initiative analysis schema {version} is unsupported; expected {CurrentSchemaVersion}. Historical analyses are not rewritten automatically.");
+        }
+
+        return JsonSerializer.Deserialize<PersistedInitiativeAnalysis>(json, JsonOptions)
+            ?? throw new InvalidDataException("Initiative analysis JSON could not be deserialized.");
     }
 
     private static string Hash(string value) => Convert.ToHexString(

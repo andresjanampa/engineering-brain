@@ -310,7 +310,7 @@ public sealed class LiveEvaluationTests
             EpistemicStatus.Fact,
             [new EvidenceReference(EvidenceKind.Entity, "repo-1", "main", entityId, "project:business",
                 null, null, null, "src/Business/BusinessService.cs", 1, 2, ResolutionLevel.Semantic)],
-            [], [])],
+            [], [], [])],
         [], [], [], "test");
 
     private static LiveEvaluationCaseResult SuccessfulResult(

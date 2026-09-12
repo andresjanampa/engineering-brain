@@ -600,6 +600,7 @@ internal static class BrainCli
         Console.WriteLine($"Commit: {result.Git.HeadCommit ?? "n/a"}");
         Console.WriteLine($"Working tree: {FormatWorkingTree(result.Git)}");
         Console.WriteLine($"Status: {result.Analysis.Status}");
+        Console.WriteLine($"Policy outcome: {result.PolicyOutcome}");
         Console.WriteLine($"Summary: {result.Analysis.Summary}");
 
         WriteSection("Initiative Understanding");
@@ -619,11 +620,18 @@ internal static class BrainCli
         }
 
         WriteSection("Recommendations");
-        foreach (var recommendation in result.Recommendations)
+        foreach (var governed in result.Recommendations)
         {
+            var recommendation = governed.ValidatedRecommendation;
             Console.WriteLine($"{recommendation.Recommendation.Decision}: {recommendation.Recommendation.Subject}");
             Console.WriteLine($"Evidence: {recommendation.ValidationStatus}; epistemic: {recommendation.Recommendation.EpistemicStatus}");
+            Console.WriteLine($"Final disposition: {governed.Disposition}");
             Console.WriteLine($"Reason: {recommendation.Recommendation.Reason}");
+            foreach (var policy in governed.PolicyResults)
+            {
+                Console.WriteLine(
+                    $"- Policy: {policy.PolicyId} v{policy.PolicyVersion}; {policy.ComplianceStatus}; severity={policy.Severity}; source={policy.Source}");
+            }
             foreach (var evidence in recommendation.ValidEvidence)
             {
                 Console.WriteLine($"- {FormatEvidence(evidence)}");

@@ -113,6 +113,14 @@ public sealed class InitiativeAnalysisSecurityTests
         Assert.False(document.RootElement.GetProperty("additionalProperties").GetBoolean());
         Assert.DoesNotContain("apiKey", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("recommendations", json, StringComparison.Ordinal);
+        Assert.Contains("policyRelevantActions", json, StringComparison.Ordinal);
+
+        var recommendation = document.RootElement.GetProperty("properties")
+            .GetProperty("recommendations")
+            .GetProperty("items");
+        Assert.Contains(
+            recommendation.GetProperty("required").EnumerateArray(),
+            property => property.GetString() == "policyRelevantActions");
     }
 
     private static FakeReasoningProvider CreateProvider() => new((request, type) =>

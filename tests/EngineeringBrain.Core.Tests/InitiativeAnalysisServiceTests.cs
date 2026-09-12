@@ -22,7 +22,10 @@ public sealed class InitiativeAnalysisServiceTests
         Assert.Equal(ReasoningStage.InitiativeUnderstanding, provider.Requests[0].Stage);
         Assert.Equal(ReasoningStage.ArchitectureAnalysis, provider.Requests[1].Stage);
         Assert.Equal(2, result.Usage.Calls.Count);
-        Assert.Equal(EvidenceValidationStatus.Validated, Assert.Single(result.Recommendations).ValidationStatus);
+        var recommendation = Assert.Single(result.Recommendations);
+        Assert.Equal(EvidenceValidationStatus.Validated, recommendation.ValidatedRecommendation.ValidationStatus);
+        Assert.Equal(RecommendationDisposition.Accepted, recommendation.Disposition);
+        Assert.Equal(PolicyOutcome.Allowed, result.PolicyOutcome);
     }
 
     [Fact]
@@ -39,7 +42,8 @@ public sealed class InitiativeAnalysisServiceTests
 
         Assert.Empty(result.Retrieval.Components);
         Assert.Contains("NO_STRONG_COMPONENT_CANDIDATES", provider.Requests[1].UserData, StringComparison.Ordinal);
-        Assert.Equal(EvidenceValidationStatus.Proposal, result.Recommendations[0].ValidationStatus);
+        Assert.Equal(EvidenceValidationStatus.Proposal, result.Recommendations[0].ValidatedRecommendation.ValidationStatus);
+        Assert.Equal(RecommendationDisposition.NeedsReview, result.Recommendations[0].Disposition);
     }
 
     [Fact]
@@ -81,7 +85,7 @@ public sealed class InitiativeAnalysisServiceTests
 
         var result = await Service(provider, fixture.Root).AnalyzeAsync(Request(memory, "Extend core."));
 
-        Assert.Equal(expected, result.Recommendations[0].ValidationStatus);
+        Assert.Equal(expected, result.Recommendations[0].ValidatedRecommendation.ValidationStatus);
     }
 
     [Fact]
@@ -100,8 +104,8 @@ public sealed class InitiativeAnalysisServiceTests
 
         var result = await Service(provider, fixture.Root).AnalyzeAsync(Request(memory, "Reuse core."));
 
-        Assert.Equal(EvidenceValidationStatus.Invalid, result.Recommendations[0].ValidationStatus);
-        Assert.Equal("entity:not-real", result.Recommendations[0].Recommendation.Evidence[0].EntityId);
+        Assert.Equal(EvidenceValidationStatus.Invalid, result.Recommendations[0].ValidatedRecommendation.ValidationStatus);
+        Assert.Equal("entity:not-real", result.Recommendations[0].ValidatedRecommendation.Recommendation.Evidence[0].EntityId);
     }
 
     [Fact]
@@ -132,6 +136,54 @@ public sealed class InitiativeAnalysisServiceTests
         await Assert.ThrowsAsync<ArgumentException>(() => service.AnalyzeAsync(Request(memory, " ")));
         await Assert.ThrowsAsync<ArgumentException>(() => service.AnalyzeAsync(Request(memory, new string('x', 40_001))));
         Assert.Empty(provider.Requests);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_GovernsAfterEvidenceValidationAndPersistsSchemaTwo()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var action = new PolicyRelevantAction(
+            PolicyActionOperation.RemoteTransmission,
+            PolicyActionBoundary.Remote,
+            PolicyContentScope.CompleteRepository,
+            PolicyAuthorizationMode.Explicit,
+            null,
+            null);
+        var original = InitiativeAnalysisTestData.Recommendation(RecommendationDecision.Create, [], [action]);
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("repository upload"),
+            InitiativeAnalysisTestData.Analysis(original));
+        var store = new LocalInitiativeAnalysisStore(fixture.Root);
+        var service = new InitiativeAnalysisService(provider, store: store);
+
+        var result = await service.AnalyzeAsync(Request(memory, "Upload the repository.") with { PersistResult = true });
+        var persisted = await store.LoadAsync(result.SavedAnalysisPath!);
+
+        Assert.Equal(2, persisted.SchemaVersion);
+        Assert.Equal(PolicyOutcome.Blocked, persisted.PolicyOutcome);
+        var persistedRecommendation = Assert.Single(persisted.Recommendations);
+        Assert.Equal(RecommendationDisposition.Rejected, persistedRecommendation.Disposition);
+        Assert.Equal(original.Decision, persistedRecommendation.ValidatedRecommendation.Recommendation.Decision);
+        Assert.Equal(original.Subject, persistedRecommendation.ValidatedRecommendation.Recommendation.Subject);
+        Assert.Equal(
+            Assert.Single(original.PolicyRelevantActions),
+            Assert.Single(persistedRecommendation.ValidatedRecommendation.Recommendation.PolicyRelevantActions));
+        Assert.Equal(2, provider.Requests.Count);
+    }
+
+    [Fact]
+    public async Task AnalysisStore_RejectsHistoricalSchemaBeforeDeserialization()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var path = Path.Combine(fixture.Root, "historical.json");
+        Directory.CreateDirectory(fixture.Root);
+        await File.WriteAllTextAsync(path, "{\"schemaVersion\":1}");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new LocalInitiativeAnalysisStore(fixture.Root).LoadAsync(path));
+
+        Assert.Contains("schema 1 is unsupported", error.Message, StringComparison.Ordinal);
     }
 
     private static InitiativeAnalysisService Service(FakeReasoningProvider provider, string root) => new(

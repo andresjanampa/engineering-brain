@@ -109,12 +109,14 @@ internal static class InitiativeAnalysisTestData
 
     public static AnalysisRecommendation Recommendation(
         RecommendationDecision decision,
-        IReadOnlyList<EvidenceReference> evidence) => new(
+        IReadOnlyList<EvidenceReference> evidence,
+        IReadOnlyList<PolicyRelevantAction>? policyRelevantActions = null) => new(
         decision,
         "Subject",
         "Reason grounded in selected evidence.",
         decision == RecommendationDecision.Create ? EpistemicStatus.Proposal : EpistemicStatus.Inference,
         evidence,
         ["Potential impact remains bounded by the current graph."],
-        []);
+        [],
+        policyRelevantActions ?? []);
 }
