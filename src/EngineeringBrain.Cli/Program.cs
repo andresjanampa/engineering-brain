@@ -105,6 +105,8 @@ internal static class BrainCli
             var initiative = await File.ReadAllTextAsync(options.InitiativePath, cancellation.Token);
             var scan = await AnalyzeRepositoryAsync(options.RepositoryPath, cancellation.Token);
             var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            var reviewedConcepts = await ResolveReviewedConceptsAsync(memory, cancellation.Token);
+            WriteReviewedConceptDiagnostics(reviewedConcepts);
             var providerOptions = OpenAIReasoningProviderOptions.FromEnvironment() with
             {
                 InterpretationReasoningEffort = options.InterpretationEffort,
@@ -113,7 +115,8 @@ internal static class BrainCli
             var interpretationEffort = providerOptions.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
             var analysisEffort = providerOptions.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
             var preview = await new RemoteContextPreviewService().CreateAsync(
-                options.InitiativePath, initiative, memory, options.InterpretationModel, options.ReasoningModel,
+                options.InitiativePath, initiative, memory, reviewedConcepts,
+                options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, cancellation.Token);
             WritePreview(preview);
             if (options.Preview)
@@ -137,6 +140,7 @@ internal static class BrainCli
                     memory,
                     options.InterpretationModel,
                     options.ReasoningModel),
+                reviewedConcepts,
                 cancellation.Token);
             WriteAnalysis(result);
             return 0;
@@ -154,6 +158,46 @@ internal static class BrainCli
         {
             Console.Error.WriteLine($"Command failed: {exception.Message}");
             return 1;
+        }
+    }
+
+    private static async Task<ReviewedConceptResolutionResult> ResolveReviewedConceptsAsync(
+        ProjectMemorySyncResult memory,
+        CancellationToken cancellationToken)
+    {
+        var load = await new LocalReviewedConceptStore().LoadAsync(memory.Location, cancellationToken);
+        if (load.Status == ReviewedConceptLoadStatus.Absent)
+        {
+            return ReviewedConceptResolutionResult.Absent;
+        }
+
+        if (load.Status == ReviewedConceptLoadStatus.Invalid)
+        {
+            return new ReviewedConceptResolutionResult(
+                ReviewedConceptResolutionStatus.Invalid,
+                load.ContentHash,
+                [],
+                load.Diagnostics);
+        }
+
+        var evidence = ReviewedConceptEvidenceContext.FromMemory(memory);
+        var validation = new ReviewedConceptValidator().Validate(load.Catalog!, evidence);
+        return new ReviewedConceptResolver().Resolve(load, validation, evidence);
+    }
+
+    private static void WriteReviewedConceptDiagnostics(ReviewedConceptResolutionResult result)
+    {
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            var identity = string.Join(' ', new[] { diagnostic.ConceptId, diagnostic.EntityId }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+            var message = diagnostic.Message.Length <= 240
+                ? diagnostic.Message
+                : diagnostic.Message[..240];
+            Console.Error.WriteLine(
+                $"Reviewed concept {diagnostic.Severity} {diagnostic.Code}"
+                + (identity.Length == 0 ? string.Empty : $" [{identity}]")
+                + $": {message}");
         }
     }
 

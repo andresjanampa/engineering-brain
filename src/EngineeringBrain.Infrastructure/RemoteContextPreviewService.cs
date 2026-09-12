@@ -60,12 +60,37 @@ public sealed class RemoteContextPreviewService
         string reasoningModel,
         string interpretationEffort,
         string analysisEffort,
+        CancellationToken cancellationToken = default) => await CreateAsync(
+        initiativeFileName,
+        initiative,
+        memory,
+        ReviewedConceptResolutionResult.Absent,
+        interpretationModel,
+        reasoningModel,
+        interpretationEffort,
+        analysisEffort,
+        cancellationToken);
+
+    public async Task<RemoteContextPreview> CreateAsync(
+        string initiativeFileName,
+        string initiative,
+        ProjectMemorySyncResult memory,
+        ReviewedConceptResolutionResult reviewedConcepts,
+        string interpretationModel,
+        string reasoningModel,
+        string interpretationEffort,
+        string analysisEffort,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(reviewedConcepts);
         var call1Security = _guard.ValidateInitiative(initiative);
         _guard.ThrowIfInvalid(call1Security);
         var understanding = _interpreter.Interpret(initiative);
-        var retrieval = _retriever.Retrieve(understanding, memory.Manifest, memory.SourceSnapshot);
+        var retrieval = _retriever.Retrieve(
+            understanding,
+            memory.Manifest,
+            memory.SourceSnapshot,
+            reviewedConcepts.Profiles);
         var context = await _contextBuilder.BuildAsync(understanding, retrieval, memory, cancellationToken);
         var call2Security = _guard.Validate(context);
         _guard.ThrowIfInvalid(call2Security);

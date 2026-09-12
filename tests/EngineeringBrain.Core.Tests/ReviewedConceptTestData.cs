@@ -112,6 +112,12 @@ internal static class ReviewedConceptTestData
             ["persistence"],
             ["analysis"]));
 
+    public static ReviewedConceptResolutionResult Resolution(params ComponentConceptProfile[] profiles) => new(
+        ReviewedConceptResolutionStatus.Valid,
+        "catalog-fingerprint",
+        profiles,
+        []);
+
     public static string CandidateProjection(ComponentCandidate candidate) => string.Join('|',
         candidate.EntityId,
         candidate.Score,
