@@ -175,8 +175,8 @@
         ]
       },
       "repositoryExpectations": {
-        "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
-        "acceptableEntities": ["EngineeringBrain.Infrastructure.InitiativeContextBuilder", "EngineeringBrain.Core.IReasoningProvider", "EngineeringBrain.Infrastructure.OpenAIReasoningProvider"],
+        "requiredEntities": ["EngineeringBrain.Infrastructure.OpenAIReasoningProvider"],
+        "acceptableEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard", "EngineeringBrain.Infrastructure.InitiativeContextBuilder", "EngineeringBrain.Core.IReasoningProvider"],
         "requiredProjects": ["EngineeringBrain.Infrastructure"],
         "acceptableProjects": ["EngineeringBrain.Core"]
       },
