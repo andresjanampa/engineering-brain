@@ -161,7 +161,10 @@ public sealed record EvaluationRunResult(
     IReadOnlyList<EvaluationCaseResult> Cases,
     IReadOnlyList<EvaluationRegression> Regressions,
     string BaselineStatus,
-    string ResultPath);
+    string ResultPath,
+    ReviewedConceptResolutionStatus ReviewedConceptStatus = ReviewedConceptResolutionStatus.Unknown,
+    string? ReviewedConceptCatalogFingerprint = null,
+    int ReviewedConceptProfileCount = 0);
 
 public sealed record EvaluationBaseline(
     int EvaluationSchemaVersion,

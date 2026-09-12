@@ -38,9 +38,18 @@ public sealed class InitiativeAnalysisService
 
     public async Task<InitiativeAnalysisResult> AnalyzeAsync(
         InitiativeAnalysisRequest request,
+        CancellationToken cancellationToken = default) => await AnalyzeAsync(
+        request,
+        ReviewedConceptResolutionResult.Absent,
+        cancellationToken);
+
+    public async Task<InitiativeAnalysisResult> AnalyzeAsync(
+        InitiativeAnalysisRequest request,
+        ReviewedConceptResolutionResult reviewedConcepts,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(reviewedConcepts);
         if (string.IsNullOrWhiteSpace(request.InitiativeText))
         {
             throw new ArgumentException("Initiative file is empty.", nameof(request));
@@ -68,7 +77,8 @@ public sealed class InitiativeAnalysisService
         var retrieval = _retriever.Retrieve(
             understandingCall.Value,
             request.Memory.Manifest,
-            request.Memory.SourceSnapshot);
+            request.Memory.SourceSnapshot,
+            reviewedConcepts.Profiles);
         var context = await _contextBuilder.BuildAsync(
             understandingCall.Value,
             retrieval,

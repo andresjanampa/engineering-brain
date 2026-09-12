@@ -28,6 +28,8 @@ public sealed class RemoteContextPreviewTests
             Assert.Equal(0, first.Security.AbsolutePathFindings);
             Assert.Equal(0, first.Security.SecretFindings);
             Assert.Equal(0, first.Security.RawSnapshotFindings);
+            Assert.DoesNotContain(first.Retrieval.Components.SelectMany(item => item.MatchReasons),
+                item => item.Signal == "reviewed concept");
             Assert.True(first.Call2.ProjectNotes + first.Call2.ComponentNotes > 0);
             var json = await File.ReadAllTextAsync(first.ManifestPath);
             Assert.DoesNotContain(initiative, json, StringComparison.Ordinal);

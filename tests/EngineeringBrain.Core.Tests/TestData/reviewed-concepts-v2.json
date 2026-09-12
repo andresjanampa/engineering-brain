@@ -1,0 +1,895 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": "f4e3cd5762b9562703df1890",
+  "branch": "feature/reviewed-concept-reranking",
+  "branchKey": "feature-reviewed-concept-reranking--015f668b46b4",
+  "sourceSnapshotSchema": 3,
+  "sourceAnalyzerVersion": "csharp-project-aware-v3",
+  "vocabularyVersion": "reviewed-vocabulary-v2-a1-c1-e2-s2",
+  "declarations": [
+    {
+      "conceptId": "absolute-path-protection",
+      "definition": "Prevents absolute local paths from entering outbound context.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "absolute"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "path",
+        "protection"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:b3fcb5d0093b766297e8cc1d4dd4711bb1fdf7c144e8e80956823cdc2c15af5b",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/InitiativeContextBuilder.cs:8",
+          "sourceFingerprint": "c6bf3976ed9abe9e4229d35160b4dfc4cf08106a888ccb2368ac27b9e56a1017"
+        },
+        {
+          "entityId": "entity:dd1c30e5048e632dc9c591b5637984ae9fde318027b99512567186d5b82d46e6",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OutboundContextGuard.cs:6",
+          "sourceFingerprint": "ec3a7d93a10161c8642343e6c3ae02785f0520cb595f52c7dbf0e8d0f776e1d6"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "495ff5772a078c839ff135e23119bd9c2f623576d46a151ba1c01f8ce5b5e990"
+    },
+    {
+      "conceptId": "analyzer-diagnostic-sanitization",
+      "definition": "Sanitizes analyzer failure diagnostics by redacting local or sensitive values and bounding message length.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "diagnostic"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "analyzer",
+        "sanitization"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:efe653096c3b809c311630b3bded4db9a41541319faa0a05ad0a3bb927ad2ca5",
+          "sourceReference": "src/EngineeringBrain.Analyzers.CSharp/SafeDiagnostic.cs:5",
+          "sourceFingerprint": "e61559226e58f6c058818d1183e9991fd5d63602c1a89970e5d479147a5f2bdb"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "c555068230a4f91b2233e172dc39779bf62f6b5d3addcff0f7158f150e1f7501"
+    },
+    {
+      "conceptId": "bounded-context-selection",
+      "definition": "Selects bounded evidence-bearing reasoning context.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "context"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "bounded",
+        "selection"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:7c18f8043099c258a2b08e75362ed0338628e8d1a7a33b47109a3dc0a73db284",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteContextPreviewService.cs:27",
+          "sourceFingerprint": "0bad76b99a4422bedf22d5186959612f7f9784dd74f6ae3777ec4205911f336f"
+        },
+        {
+          "entityId": "entity:b3fcb5d0093b766297e8cc1d4dd4711bb1fdf7c144e8e80956823cdc2c15af5b",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/InitiativeContextBuilder.cs:8",
+          "sourceFingerprint": "c6bf3976ed9abe9e4229d35160b4dfc4cf08106a888ccb2368ac27b9e56a1017"
+        },
+        {
+          "entityId": "entity:ffd6a9b312ec7e76945a6ff39db254d22c2b86f58aff9842838e835677293a50",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/TokenBudget.cs:13",
+          "sourceFingerprint": "286889ff7a75eef6e3a38b26a92fedd4dc52b14cf7eefad04733cace446ecef4"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "3041184320c9518d785d6b09c210e187881580edee4d07128a2f4301731e38bc"
+    },
+    {
+      "conceptId": "bounded-retry",
+      "definition": "Performs or represents bounded provider retry behavior.",
+      "anchorPolicy": "notRequired",
+      "anchorTokens": [],
+      "qualificationSupportTokens": [
+        "bounded",
+        "retry"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:3bc9820768b49b51de1df054ba934697a79e781219a3cbef93ed1adbda4035bb",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OpenAIReasoningProvider.cs:46",
+          "sourceFingerprint": "8519bca9dad30cb7ad1dc73c67de33868e94d0872511b3bae7b2781a2e04f049"
+        },
+        {
+          "entityId": "entity:468e035db7cedd0961a694037349005c8dd04884ea7bff51dc0f2eeb3f31cba5",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/ReasoningProviderException.cs:5",
+          "sourceFingerprint": "238b6884e7852b1ef3ca56b8ebdac5bb0754ec4c4d0940145d39c2e749043537"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "6890e18545117d0ccb8ca4f64710096a4b722ee6ebcfb54cbf80bb1382bcd099"
+    },
+    {
+      "conceptId": "evaluation-result-persistence",
+      "definition": "Persists offline or live evaluation results for later inspection.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "evaluation"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "persistence",
+        "result"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:4c7176a02639522fc631c26650bb501992bba0bdfcf66c5c7c24226c48208216",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/EvaluationServices.cs:443",
+          "sourceFingerprint": "a806cba586e2ce769c6f473348bde8ea29382fa03c01536c65912839bc09fbd4"
+        },
+        {
+          "entityId": "entity:c37c0223ac19a741e6cef47f9e6f7e6cc93349a3dfe3f129f28a94bc304dd715",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/LocalLiveEvaluationStore.cs:9",
+          "sourceFingerprint": "8362d0d00908632a9f47e28c9b0ae877fa02858c62f191b5bfd59184958952e3"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "373646f2d712df25357d28d024c11a015e04713f7c60ddb81a91555362b9fe16"
+    },
+    {
+      "conceptId": "graph-integrity-validation",
+      "definition": "Validates code graph entity identity and relation integrity.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "graph"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "integrity",
+        "validation"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:121bfddf0b7a977355cc299a3c498ea17ccd0f8e6022cc4d57477102d21258a3",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/GraphIntegrityValidator.cs:5",
+          "sourceFingerprint": "65ad12b4ea97fc1acb4a586c76ec54bffbd4b3538b0049aa6f35b8b6160a128f"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "4b129ef190badb36edfaab2facdfa0fb59eb7a2ca64681a0ec6ad33baf46eaf2"
+    },
+    {
+      "conceptId": "incremental-change-detection",
+      "definition": "Detects or resolves incremental repository changes.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "incremental"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "change",
+        "detection"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:740dfe008c1ed1cb5326a613e6127eccb4e238b64cec045f77f3da02642be418",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/IncrementalChangeDetector.cs:5",
+          "sourceFingerprint": "8a128e78693b652b7a703de2d3da57b0ca65422bdb8d91449786ebd3243ed95c"
+        },
+        {
+          "entityId": "entity:bce311a9fd8646a2173534e2bc523aab5bfb714015900fba8cd2554c3ba5cc9e",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/ProjectDependencyGraph.cs:12",
+          "sourceFingerprint": "07e0d651a8ee9261dc0cdf774e9bdf29898e23abacb0b950164cb8f66ca8bf52"
+        },
+        {
+          "entityId": "entity:d28c3d2605da3f2c0f606ffb72ee91e44c8872baf31c9488b8275c75cc863885",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/AffectedProjectResolver.cs:14",
+          "sourceFingerprint": "7101050dbe0b7eb60e51489ceb9ffb68dc091d8331d8a3f5fd90fa112ac97110"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "146baa9907babcd9442ea6d35250aa8762f3c73d20d6329e5c9a4f8a84e51e9c"
+    },
+    {
+      "conceptId": "initiative-analysis-persistence",
+      "definition": "Persists and reloads branch-scoped initiative analysis results.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "initiative"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "persistence"
+      ],
+      "contextSupportTokens": [
+        "analysis"
+      ],
+      "assignments": [
+        {
+          "entityId": "entity:55c3b63904c4f22d9662d742885bd514f2553676c4ba172f4c85143a47236c9f",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/LocalInitiativeAnalysisStore.cs:26",
+          "sourceFingerprint": "5140de6da7d04f59f9fed1e826770bd4b3b61a99a012ec4ad259e633af99139e"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "258b3151252244a0c6042e39e028231aa2cb7cd1dad4d7859f81db5a496e80de"
+    },
+    {
+      "conceptId": "live-evaluation-suite-contract",
+      "definition": "Loads and validates live evaluation suite contracts and lexical alternatives.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "live"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "contract",
+        "evaluation",
+        "suite"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:7db485ad23eac0a4965f1158cdd40cac711ef6d76ad5e69ef134a80dd1ca2541",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/LiveEvaluationSuiteSerializer.cs:7",
+          "sourceFingerprint": "23e0a795b68853a95ffa24516faa47f3396ebef6b57b199f2bbb56ee6fac7faa"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "e3dd6728cf145208dc7f9cd5f922ae3cc8b4b19f4f846fa93bed7a0aeb19a84a"
+    },
+    {
+      "conceptId": "offline-evaluation-suite-contract",
+      "definition": "Loads and validates deterministic offline evaluation suite contracts.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "offline"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "contract",
+        "evaluation",
+        "suite"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:fa87fe71fd87f7e4f3a04d0e8d8f38d9db8f91beac6e75d0fb5a6b7e804954cf",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/EvaluationServices.cs:8",
+          "sourceFingerprint": "96b408b336994bd84d236c2635240c01f177ea3c0ea71448121763aed7cf8794"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "d991c12351cb2bc592f0213c80cba99ee6b44cf27943b195d12eb259e2ba8c06"
+    },
+    {
+      "conceptId": "outbound-validation",
+      "definition": "Validates context before outbound use.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "outbound"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "validation"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:7c18f8043099c258a2b08e75362ed0338628e8d1a7a33b47109a3dc0a73db284",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteContextPreviewService.cs:27",
+          "sourceFingerprint": "0bad76b99a4422bedf22d5186959612f7f9784dd74f6ae3777ec4205911f336f"
+        },
+        {
+          "entityId": "entity:dd1c30e5048e632dc9c591b5637984ae9fde318027b99512567186d5b82d46e6",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OutboundContextGuard.cs:6",
+          "sourceFingerprint": "ec3a7d93a10161c8642343e6c3ae02785f0520cb595f52c7dbf0e8d0f776e1d6"
+        },
+        {
+          "entityId": "entity:f4647abdf534027ae8c44dd962b80680f670e259447e8c7b59407c45792e8865",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/PolicyComplianceValidator.cs:80",
+          "sourceFingerprint": "8516f7d2057dd797409e677c9881a7e0048c5107710c090375e8446bd5633c4e"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "9a15b4a48ccb9bd5bc4d7b13d07bf5151c9428b96725870451ad4874ef49295a"
+    },
+    {
+      "conceptId": "project-memory-integrity-validation",
+      "definition": "Validates managed Project Memory identities, provenance, links, hashes, and files.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "memory"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "integrity",
+        "validation"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:60bf0f64eb3b75258112cf8e330956d3f53b9429f1dda3dae9791737e252fb0a",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/ProjectMemoryValidator.cs:6",
+          "sourceFingerprint": "6fd16ff9a362e6c3956521d8bafcd8aea9aa9921a96ab787d4cb35a960bb63a7"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "e6a7adb720a84817bcddfa44bb69071adeebe7a91d46a5aaf2cc852af1bb423a"
+    },
+    {
+      "conceptId": "project-memory-manifest-contract",
+      "definition": "Serializes, deserializes, and validates Project Memory manifest contracts.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "manifest"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "contract",
+        "memory"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:d325325a36103b1aa93379c4174f73c30cc13f062ccdf2786a1f12d0ccdaf28c",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/ProjectMemoryManifestSerializer.cs:7",
+          "sourceFingerprint": "330cf632105d6e6e0dfe6ae3d0669d9db14423c29fd3073076a934c9fa6beac2"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "cc5f5d9546c2fd8039c55ca69edbec71feeb82ca92283eeff8d385c60f4a736e"
+    },
+    {
+      "conceptId": "project-memory-persistence",
+      "definition": "Persists and incrementally applies managed Project Memory notes and manifests.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "memory"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "persistence"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:c9a8b58090ba36d667b0babd954c7893fc6438b1b62fb173fe58d5e9416a96b7",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/LocalProjectMemoryStore.cs:7",
+          "sourceFingerprint": "3e254c0c0e9d277fb20d76a68bc912e9b036f0e69ecc7936c3fb1ded6738835b"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "f598296d7ae6d6164fac3a3ea5359dd3aa03683b0ac3acfce3be0bdea30b32e8"
+    },
+    {
+      "conceptId": "provider-boundary",
+      "definition": "Defines or implements a reasoning-provider boundary.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "provider"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "boundary"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:3bc9820768b49b51de1df054ba934697a79e781219a3cbef93ed1adbda4035bb",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OpenAIReasoningProvider.cs:46",
+          "sourceFingerprint": "8519bca9dad30cb7ad1dc73c67de33868e94d0872511b3bae7b2781a2e04f049"
+        },
+        {
+          "entityId": "entity:7c18f8043099c258a2b08e75362ed0338628e8d1a7a33b47109a3dc0a73db284",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteContextPreviewService.cs:27",
+          "sourceFingerprint": "0bad76b99a4422bedf22d5186959612f7f9784dd74f6ae3777ec4205911f336f"
+        },
+        {
+          "entityId": "entity:88d90996e09cc83c7d1d20d2b2c7355c7095ad6bbf88fcc08228a1f4ccace1fb",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/FakeLiveReasoningProvider.cs:5",
+          "sourceFingerprint": "7b2d3ea56505105d4f5dd78be96251a85c5b1b90576b87c267fa877de7b43fda"
+        },
+        {
+          "entityId": "entity:e6815433b7b63afaa01857eb71efc326c5589177a21cb069760830fc4e8ef503",
+          "sourceReference": "src/EngineeringBrain.Core/Abstractions.cs:42",
+          "sourceFingerprint": "b193d7a6670b197c14a79a17d3a488c99c8583dfb5e0a5e100d680970115b172"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "7d833b8ff5e94728814e97ed7a010ac7b992e5b4b556af5d88eff9856617fe73"
+    },
+    {
+      "conceptId": "raw-snapshot-protection",
+      "definition": "Prevents raw snapshots from entering outbound context.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "raw"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "protection",
+        "snapshot"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:7c18f8043099c258a2b08e75362ed0338628e8d1a7a33b47109a3dc0a73db284",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteContextPreviewService.cs:27",
+          "sourceFingerprint": "0bad76b99a4422bedf22d5186959612f7f9784dd74f6ae3777ec4205911f336f"
+        },
+        {
+          "entityId": "entity:dd1c30e5048e632dc9c591b5637984ae9fde318027b99512567186d5b82d46e6",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OutboundContextGuard.cs:6",
+          "sourceFingerprint": "ec3a7d93a10161c8642343e6c3ae02785f0520cb595f52c7dbf0e8d0f776e1d6"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "bb3d77f9a1325a5b802e1474928a543b86db0ae82a633b89a2381857ebe93042"
+    },
+    {
+      "conceptId": "reasoning-output-contract",
+      "definition": "Builds strict structured-output contracts for initiative understanding and analysis.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "reasoning"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "contract",
+        "output"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:164d2310bf4a56d87257796f19389e8c0a4e0ce4ccab509d6fd485c329c13077",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/ReasoningJsonSchema.cs:8",
+          "sourceFingerprint": "8c64bf70cb1d92fc36481521a3e93753f91b82eb69d5fe8b5ddd056abd69fe52"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "7138add95082dba13462fff5942b485f0a255365ae751d55777a7ccc7f2fd9a8"
+    },
+    {
+      "conceptId": "recommendation-evidence-validation",
+      "definition": "Validates recommendation evidence against current repository snapshot facts.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "recommendation"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "evidence",
+        "validation"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:bb0825ecca9fc5889f6d2f28c40b3044b48220da3220b51f1e74ca783c876757",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/AnalysisEvidenceValidator.cs:5",
+          "sourceFingerprint": "160b2183f6e111a25e0de039669744004e90fef4b969346938316ed09e2fe111"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "4f0aba0a8f27e590697f92ef67e8c9b8e8f9eaf06e88e2ff0e90f8d7d026597f"
+    },
+    {
+      "conceptId": "remote-authorization",
+      "definition": "Requires explicit authorization for remote or billable execution.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "remote"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "authorization"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:63ace5aa4d4a0a79233ca828e394d42e9d4353896300e74c108603d277bd1ea9",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/LiveEvaluationSuiteSerializer.cs:117",
+          "sourceFingerprint": "4c1f33b4cf134e2c6434fc1c1d953f81bcee4ca341a0661e3da6ba4795dfc0b5"
+        },
+        {
+          "entityId": "entity:7c18f8043099c258a2b08e75362ed0338628e8d1a7a33b47109a3dc0a73db284",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteContextPreviewService.cs:27",
+          "sourceFingerprint": "0bad76b99a4422bedf22d5186959612f7f9784dd74f6ae3777ec4205911f336f"
+        },
+        {
+          "entityId": "entity:ba7a2637d42bc34679b117b62887b0a9016660ac7fa0127bfac5006c9dc1b3a9",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteReasoningAuthorization.cs:3",
+          "sourceFingerprint": "e1275890ae38f0643350b4eef2aa8ca2fe5991b3c8bd8bcb2f99742af0c40ba0"
+        },
+        {
+          "entityId": "entity:f4647abdf534027ae8c44dd962b80680f670e259447e8c7b59407c45792e8865",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/PolicyComplianceValidator.cs:80",
+          "sourceFingerprint": "8516f7d2057dd797409e677c9881a7e0048c5107710c090375e8446bd5633c4e"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "a88579af0753e0229fe329dc44faea6d97f2cb9e0e01d255f21df3d1e8b8e2d1"
+    },
+    {
+      "conceptId": "remote-preview-persistence",
+      "definition": "Persists branch-scoped outbound context preview manifests.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "preview"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "persistence",
+        "remote"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:62a002471379ea8c3e1d4450a5c32a1f52a03fc202d2ea68437c05d41d83ef5d",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/RemoteContextPreviewService.cs:157",
+          "sourceFingerprint": "8c7e96f59415f6422f915d227966d994a15ca784792bb59d8c73ff6e8f1ac030"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "44fa5b7a8f131d10b02194111e74816394e216a8031a9cb60c0b0161e381c232"
+    },
+    {
+      "conceptId": "repository-snapshot-contract",
+      "definition": "Serializes, deserializes, and validates repository snapshot schema contracts.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "repository",
+          "snapshot"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "contract"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:e0d8f6fcdc8ff246ea01aba913200d3e9ccfc138e555ea3a3ed926f1e06235d5",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/SnapshotJsonSerializer.cs:7",
+          "sourceFingerprint": "13eb5712dc8c7d86247b995ec5f5a18b43a656cdc8cc6540fc1a4349f80716a7"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "3ca43bf7902093d2ad6730f6c365df15ca92541e5fc96594faddee6c583f2994"
+    },
+    {
+      "conceptId": "repository-snapshot-persistence",
+      "definition": "Persists and reloads repository analysis snapshots.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "repository",
+          "snapshot"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "persistence"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:b31c7963fbbfc042f3f3f7357051c0f6c68e3ae96c26e13f0ee7918621efca0e",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/LocalRepositorySnapshotStore.cs:6",
+          "sourceFingerprint": "ca3ce0e90d26d373d7ef12debf4066db25581f83692822672c5d5d9bff11fc9c"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "a8749d506d9740b8f54bf0b9fb8e0221d8f6de4b654c923467e98bd9714b63d2"
+    },
+    {
+      "conceptId": "secret-protection",
+      "definition": "Prevents secrets or credentials from entering outbound context.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "secret"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "protection"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:dd1c30e5048e632dc9c591b5637984ae9fde318027b99512567186d5b82d46e6",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OutboundContextGuard.cs:6",
+          "sourceFingerprint": "ec3a7d93a10161c8642343e6c3ae02785f0520cb595f52c7dbf0e8d0f776e1d6"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "7ca691fbf58e1ebafb9ef9aa06f35f92e39b83f791c0a6df82b9f5cbba90703d"
+    },
+    {
+      "conceptId": "source-body-protection",
+      "definition": "Prevents source bodies from entering outbound context.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "source"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "body",
+        "protection"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:b3fcb5d0093b766297e8cc1d4dd4711bb1fdf7c144e8e80956823cdc2c15af5b",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/InitiativeContextBuilder.cs:8",
+          "sourceFingerprint": "c6bf3976ed9abe9e4229d35160b4dfc4cf08106a888ccb2368ac27b9e56a1017"
+        },
+        {
+          "entityId": "entity:dd1c30e5048e632dc9c591b5637984ae9fde318027b99512567186d5b82d46e6",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/OutboundContextGuard.cs:6",
+          "sourceFingerprint": "ec3a7d93a10161c8642343e6c3ae02785f0520cb595f52c7dbf0e8d0f776e1d6"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "945b3db0a9e6c56ac9dd06130c6a3fb19fc878151ef84b9be81edd3861f1244e"
+    },
+    {
+      "conceptId": "token-budget-enforcement",
+      "definition": "Estimates or enforces a bounded token budget.",
+      "anchorPolicy": "clear",
+      "anchorTokens": [
+        [
+          "budget"
+        ]
+      ],
+      "qualificationSupportTokens": [
+        "enforcement",
+        "token"
+      ],
+      "contextSupportTokens": [],
+      "assignments": [
+        {
+          "entityId": "entity:b3fcb5d0093b766297e8cc1d4dd4711bb1fdf7c144e8e80956823cdc2c15af5b",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/InitiativeContextBuilder.cs:8",
+          "sourceFingerprint": "c6bf3976ed9abe9e4229d35160b4dfc4cf08106a888ccb2368ac27b9e56a1017"
+        },
+        {
+          "entityId": "entity:ffd6a9b312ec7e76945a6ff39db254d22c2b86f58aff9842838e835677293a50",
+          "sourceReference": "src/EngineeringBrain.Infrastructure/TokenBudget.cs:13",
+          "sourceFingerprint": "286889ff7a75eef6e3a38b26a92fedd4dc52b14cf7eefad04733cace446ecef4"
+        }
+      ],
+      "provenance": {
+        "sourceReference": "reviewed-concept-vocabulary-v2-research-results.json|anchor-aware-concept-qualification-research/a1-classification.json",
+        "sourceHash": "C10AC0049558EDC8F30BFE267E60C505CDFB9165FE5B3941B572D6CCFD6D63C3|30E835703D376320949FE65212E1CF6906E52AD37AD8C2FF1E44DDD60FEA310F"
+      },
+      "review": {
+        "reviewer": "engineering-brain-reviewed-research",
+        "version": 1,
+        "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
+      },
+      "fingerprint": "4ecd151070cf6aa0fc4324bef5effae0aac2ee5a0c5176c778ac6a76d29eadcf"
+    }
+  ]
+}

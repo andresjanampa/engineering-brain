@@ -6,6 +6,57 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class InitiativeAnalysisServiceTests
 {
     [Fact]
+    public async Task AnalyzeAndPreview_ReuseSameReviewedConceptResolution()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var understanding = InitiativeAnalysisTestData.Understanding("business analyzer");
+        var provider = Provider(understanding, InitiativeAnalysisTestData.Analysis());
+        var concepts = ReviewedConceptTestData.Resolution(
+            ReviewedConceptTestData.Profile(
+                "entity:business-service",
+                ReviewedConceptTestData.Concept("business-analyzer")));
+        var previewStore = new RemoteContextPreviewStore(fixture.Root);
+
+        var preview = await new RemoteContextPreviewService(store: previewStore).CreateAsync(
+            "initiative.md",
+            "Add business analyzer support.",
+            memory,
+            concepts,
+            "model-a",
+            "model-b",
+            "low",
+            "medium");
+        var analysis = await Service(provider, fixture.Root).AnalyzeAsync(
+            Request(memory, "Add business analyzer support."),
+            concepts);
+
+        var previewReason = Assert.Single(
+            preview.Retrieval.Components.Single(item => item.EntityId == "entity:business-service").MatchReasons,
+            item => item.Signal == "reviewed concept");
+        var analysisReason = Assert.Single(
+            analysis.Retrieval.Components.Single(item => item.EntityId == "entity:business-service").MatchReasons,
+            item => item.Signal == "reviewed concept");
+        Assert.Equal(previewReason, analysisReason);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_ExistingOverloadRemainsLexicalOnly()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business analyzer"),
+            InitiativeAnalysisTestData.Analysis());
+
+        var result = await Service(provider, fixture.Root).AnalyzeAsync(
+            Request(memory, "Add business analyzer support."));
+
+        Assert.DoesNotContain(result.Retrieval.Components.SelectMany(item => item.MatchReasons),
+            item => item.Signal == "reviewed concept");
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_NormalInitiativeUsesTwoStructuredStagesAndCapturesUsage()
     {
         using var fixture = new InitiativeMemoryFixture();

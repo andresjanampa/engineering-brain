@@ -52,10 +52,37 @@ public sealed class LiveEvaluationService
         string interpretationEffort,
         string analysisEffort,
         LivePricingCatalog? pricing = null,
+        CancellationToken cancellationToken = default) => await RunAsync(
+        plan,
+        suitePath,
+        memory,
+        ReviewedConceptResolutionResult.Absent,
+        providerName,
+        providerFactory,
+        interpretationModel,
+        reasoningModel,
+        interpretationEffort,
+        analysisEffort,
+        pricing,
+        cancellationToken);
+
+    public async Task<LiveEvaluationRun> RunAsync(
+        LiveEvaluationPlan plan,
+        string suitePath,
+        ProjectMemorySyncResult memory,
+        ReviewedConceptResolutionResult reviewedConcepts,
+        string providerName,
+        Func<LiveEvaluationCase, int, IReasoningProvider> providerFactory,
+        string interpretationModel,
+        string reasoningModel,
+        string interpretationEffort,
+        string analysisEffort,
+        LivePricingCatalog? pricing = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(memory);
+        ArgumentNullException.ThrowIfNull(reviewedConcepts);
         ArgumentNullException.ThrowIfNull(providerFactory);
         var started = _clock().ToUniversalTime();
         var snapshot = memory.SourceSnapshot;
@@ -71,6 +98,7 @@ public sealed class LiveEvaluationService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var result = await EvaluateCaseAsync(item, runNumber, suitePath, memory,
+                reviewedConcepts,
                 providerName, providerFactory, interpretationModel, reasoningModel,
                 interpretationEffort, analysisEffort, cancellationToken);
             results.Add(result);
@@ -104,7 +132,10 @@ public sealed class LiveEvaluationService
                 LiveConsistencyCalculator.Calculate(current),
                 directory,
                 Path.Combine(directory, "summary.json"),
-                Path.Combine(directory, "review.md"));
+                Path.Combine(directory, "review.md"),
+                reviewedConcepts.Status,
+                reviewedConcepts.CatalogFingerprint,
+                reviewedConcepts.Profiles.Count);
         }
     }
 
@@ -131,6 +162,7 @@ public sealed class LiveEvaluationService
         int runNumber,
         string suitePath,
         ProjectMemorySyncResult memory,
+        ReviewedConceptResolutionResult reviewedConcepts,
         string providerName,
         Func<LiveEvaluationCase, int, IReasoningProvider> providerFactory,
         string interpretationModel,
@@ -183,8 +215,16 @@ public sealed class LiveEvaluationService
             understanding = call1.Value;
             understandingMetrics = _metrics.EvaluateUnderstanding(item, understanding, memory.SourceSnapshot);
 
-            var goldenRetrieval = _retriever.Retrieve(item.GoldenUnderstanding, memory.Manifest, memory.SourceSnapshot);
-            retrieval = _retriever.Retrieve(understanding, memory.Manifest, memory.SourceSnapshot);
+            var goldenRetrieval = _retriever.Retrieve(
+                item.GoldenUnderstanding,
+                memory.Manifest,
+                memory.SourceSnapshot,
+                reviewedConcepts.Profiles);
+            retrieval = _retriever.Retrieve(
+                understanding,
+                memory.Manifest,
+                memory.SourceSnapshot,
+                reviewedConcepts.Profiles);
             retrievalComparison = LiveEvaluationMetricCalculator.CompareRetrieval(
                 _metrics.EvaluateRetrieval(goldenRetrieval, item.RepositoryExpectations),
                 _metrics.EvaluateRetrieval(retrieval, item.RepositoryExpectations));

@@ -105,6 +105,8 @@ internal static class BrainCli
             var initiative = await File.ReadAllTextAsync(options.InitiativePath, cancellation.Token);
             var scan = await AnalyzeRepositoryAsync(options.RepositoryPath, cancellation.Token);
             var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            var reviewedConcepts = await ResolveReviewedConceptsAsync(memory, cancellation.Token);
+            WriteReviewedConceptDiagnostics(reviewedConcepts);
             var providerOptions = OpenAIReasoningProviderOptions.FromEnvironment() with
             {
                 InterpretationReasoningEffort = options.InterpretationEffort,
@@ -113,7 +115,8 @@ internal static class BrainCli
             var interpretationEffort = providerOptions.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
             var analysisEffort = providerOptions.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
             var preview = await new RemoteContextPreviewService().CreateAsync(
-                options.InitiativePath, initiative, memory, options.InterpretationModel, options.ReasoningModel,
+                options.InitiativePath, initiative, memory, reviewedConcepts,
+                options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, cancellation.Token);
             WritePreview(preview);
             if (options.Preview)
@@ -137,6 +140,7 @@ internal static class BrainCli
                     memory,
                     options.InterpretationModel,
                     options.ReasoningModel),
+                reviewedConcepts,
                 cancellation.Token);
             WriteAnalysis(result);
             return 0;
@@ -154,6 +158,38 @@ internal static class BrainCli
         {
             Console.Error.WriteLine($"Command failed: {exception.Message}");
             return 1;
+        }
+    }
+
+    private static async Task<ReviewedConceptResolutionResult> ResolveReviewedConceptsAsync(
+        ProjectMemorySyncResult memory,
+        CancellationToken cancellationToken)
+    {
+        var load = await new LocalReviewedConceptStore().LoadAsync(memory.Location, cancellationToken);
+        if (load.Status == ReviewedConceptLoadStatus.Absent)
+        {
+            return ReviewedConceptResolutionResult.Absent;
+        }
+
+        if (load.Status == ReviewedConceptLoadStatus.Invalid)
+        {
+            return new ReviewedConceptResolutionResult(
+                ReviewedConceptResolutionStatus.Invalid,
+                load.ContentHash,
+                [],
+                load.Diagnostics);
+        }
+
+        var evidence = ReviewedConceptEvidenceContext.FromMemory(memory);
+        var validation = new ReviewedConceptValidator().Validate(load.Catalog!, evidence);
+        return new ReviewedConceptResolver().Resolve(load, validation, evidence);
+    }
+
+    private static void WriteReviewedConceptDiagnostics(ReviewedConceptResolutionResult result)
+    {
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            Console.Error.WriteLine(ReviewedConceptDiagnosticFormatter.Format(diagnostic));
         }
     }
 
@@ -264,8 +300,15 @@ internal static class BrainCli
             var suite = await serializer.LoadAsync(suitePath, cancellation.Token);
             var scan = await AnalyzeRepositoryAsync(repositoryPath, cancellation.Token);
             var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            var reviewedConcepts = await ResolveReviewedConceptsAsync(memory, cancellation.Token);
+            WriteReviewedConceptDiagnostics(reviewedConcepts);
             var harness = new EvaluationHarness();
-            var cases = await harness.EvaluateAsync(suite, suitePath, memory, cancellation.Token);
+            var cases = await harness.EvaluateAsync(
+                suite,
+                suitePath,
+                memory,
+                reviewedConcepts,
+                cancellation.Token);
             var splits = EvaluationHarness.Grouped(cases);
             var aggregate = splits.All;
             var baselinePath = Path.Combine(Path.GetDirectoryName(suitePath)!, "baseline.json");
@@ -286,7 +329,10 @@ internal static class BrainCli
                 EvaluationHarness.RetrievalVersion, DateTimeOffset.UtcNow, aggregate, splits,
                 EvaluationHarness.Categories(cases), cases, regressions,
                 updateBaseline ? "Updated explicitly" : baseline is null ? "Missing" : "Compared",
-                string.Empty);
+                string.Empty,
+                reviewedConcepts.Status,
+                reviewedConcepts.CatalogFingerprint,
+                reviewedConcepts.Profiles.Count);
             if (updateBaseline)
             {
                 var created = new EvaluationBaseline(result.EvaluationSchemaVersion, result.SuiteId,
@@ -353,6 +399,9 @@ internal static class BrainCli
                 interpretationEffort, analysisEffort);
             if (options.Preview) return 0;
 
+            var reviewedConcepts = await ResolveReviewedConceptsAsync(memory, cancellation.Token);
+            WriteReviewedConceptDiagnostics(reviewedConcepts);
+
             LivePricingCatalog? pricing = options.PricingPath is null
                 ? null
                 : await LivePricingCatalogLoader.LoadAsync(options.PricingPath, cancellation.Token);
@@ -361,7 +410,7 @@ internal static class BrainCli
                 ? new FakeLiveReasoningProvider(item, memory.SourceSnapshot, runNumber, interpretationEffort, analysisEffort)
                 : new OpenAIReasoningProvider(apiKey!, providerOptions);
             var result = await new LiveEvaluationService().RunAsync(
-                plan, suitePath, memory, providerName, Factory,
+                plan, suitePath, memory, reviewedConcepts, providerName, Factory,
                 options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, pricing, cancellation.Token);
             WriteLiveEvaluation(result);
