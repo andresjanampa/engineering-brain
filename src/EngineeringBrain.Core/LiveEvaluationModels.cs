@@ -269,4 +269,7 @@ public sealed record LiveEvaluationRun(
     LiveConsistencyMetrics Consistency,
     string ResultDirectory,
     string SummaryPath,
-    string ReviewPath);
+    string ReviewPath,
+    ReviewedConceptResolutionStatus ReviewedConceptStatus = ReviewedConceptResolutionStatus.Absent,
+    string? ReviewedConceptCatalogFingerprint = null,
+    int ReviewedConceptProfileCount = 0);

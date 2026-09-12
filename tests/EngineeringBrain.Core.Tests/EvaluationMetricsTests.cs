@@ -212,6 +212,45 @@ public sealed class EvaluationMetricsTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task ResultStore_PersistsEffectiveReviewedConceptConfiguration()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"brain-eval-result-{Guid.NewGuid():N}");
+        var aggregate = Aggregate();
+        var result = new EvaluationRunResult(
+            1,
+            "suite",
+            "repository",
+            "feature/concepts",
+            "analyzer",
+            EvaluationHarness.RetrievalVersion,
+            new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero),
+            aggregate,
+            new EvaluationGroupedMetrics(aggregate, aggregate, aggregate),
+            [],
+            [],
+            [],
+            "Compared",
+            string.Empty,
+            ReviewedConceptResolutionStatus.ValidWithDiagnostics,
+            "catalog-fingerprint",
+            3);
+        try
+        {
+            var path = await new EvaluationResultStore(root).SaveResultAsync(result);
+            using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            var json = document.RootElement;
+
+            Assert.Equal("validWithDiagnostics", json.GetProperty("reviewedConceptStatus").GetString());
+            Assert.Equal("catalog-fingerprint", json.GetProperty("reviewedConceptCatalogFingerprint").GetString());
+            Assert.Equal(3, json.GetProperty("reviewedConceptProfileCount").GetInt32());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     private static EvaluationAggregateMetrics Aggregate() => new(
         Cases: 1, Passed: 1, RecallAt5: 1, RecallAt10: 1, PrecisionAt5: 0.5, PrecisionAt10: 0.5,
         MeanReciprocalRank: 1, ProjectRecallAt3: 1, ProjectMeanReciprocalRank: 1,

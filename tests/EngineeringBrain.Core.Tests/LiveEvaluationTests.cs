@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using EngineeringBrain.Core;
 using EngineeringBrain.Infrastructure;
 
@@ -40,6 +41,14 @@ public sealed class LiveEvaluationTests
             value => value.Signal == "reviewed concept");
         Assert.Contains("business-analyzer@", reason.MatchedValue, StringComparison.Ordinal);
         Assert.Equal(caseResult.RetrievalComparison!.Golden, caseResult.RetrievalComparison.Actual);
+        Assert.Equal(ReviewedConceptResolutionStatus.Valid, result.ReviewedConceptStatus);
+        Assert.Equal("catalog-fingerprint", result.ReviewedConceptCatalogFingerprint);
+        Assert.Single(concepts.Profiles);
+        Assert.Equal(concepts.Profiles.Count, result.ReviewedConceptProfileCount);
+        var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+        Assert.Equal(result.ReviewedConceptStatus, persisted.ReviewedConceptStatus);
+        Assert.Equal(result.ReviewedConceptCatalogFingerprint, persisted.ReviewedConceptCatalogFingerprint);
+        Assert.Equal(result.ReviewedConceptProfileCount, persisted.ReviewedConceptProfileCount);
     }
 
     [Fact]
@@ -536,6 +545,24 @@ public sealed class LiveEvaluationTests
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Fact]
+    public async Task LiveResultStore_MissingReviewedConceptProvenanceDefaultsToAbsent()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var result = await fixture.RunAsync(FakeFactory(fixture));
+        var historical = JsonNode.Parse(await File.ReadAllTextAsync(result.SummaryPath))!.AsObject();
+        historical.Remove("reviewedConceptStatus");
+        historical.Remove("reviewedConceptCatalogFingerprint");
+        historical.Remove("reviewedConceptProfileCount");
+        await File.WriteAllTextAsync(result.SummaryPath, historical.ToJsonString());
+
+        var loaded = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+
+        Assert.Equal(ReviewedConceptResolutionStatus.Absent, loaded.ReviewedConceptStatus);
+        Assert.Null(loaded.ReviewedConceptCatalogFingerprint);
+        Assert.Equal(0, loaded.ReviewedConceptProfileCount);
     }
 
     [Fact]

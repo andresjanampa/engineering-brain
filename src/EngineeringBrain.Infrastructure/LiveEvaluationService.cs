@@ -132,7 +132,10 @@ public sealed class LiveEvaluationService
                 LiveConsistencyCalculator.Calculate(current),
                 directory,
                 Path.Combine(directory, "summary.json"),
-                Path.Combine(directory, "review.md"));
+                Path.Combine(directory, "review.md"),
+                reviewedConcepts.Status,
+                reviewedConcepts.CatalogFingerprint,
+                reviewedConcepts.Profiles.Count);
         }
     }
 

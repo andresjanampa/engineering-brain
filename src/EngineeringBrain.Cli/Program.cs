@@ -329,7 +329,10 @@ internal static class BrainCli
                 EvaluationHarness.RetrievalVersion, DateTimeOffset.UtcNow, aggregate, splits,
                 EvaluationHarness.Categories(cases), cases, regressions,
                 updateBaseline ? "Updated explicitly" : baseline is null ? "Missing" : "Compared",
-                string.Empty);
+                string.Empty,
+                reviewedConcepts.Status,
+                reviewedConcepts.CatalogFingerprint,
+                reviewedConcepts.Profiles.Count);
             if (updateBaseline)
             {
                 var created = new EvaluationBaseline(result.EvaluationSchemaVersion, result.SuiteId,
