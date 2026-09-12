@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using EngineeringBrain.Core;
@@ -118,31 +117,17 @@ public static class ReviewedConceptSerializer
             string.Empty,
             [declaration])).Declarations[0];
 
-        var values = new List<string?>
-        {
+        var payload = new DeclarationFingerprintPayload(
             canonical.ConceptId,
             canonical.Definition,
-            canonical.AnchorPolicy.ToString()
-        };
-        values.AddRange(canonical.AnchorTokens.Select(group => string.Join('\u001f', group)));
-        values.Add("<qualification-support>");
-        values.AddRange(canonical.QualificationSupportTokens);
-        values.Add("<context-support>");
-        values.AddRange(canonical.ContextSupportTokens);
-        values.Add("<assignments>");
-        foreach (var assignment in canonical.Assignments)
-        {
-            values.Add(assignment.EntityId);
-            values.Add(assignment.SourceReference);
-            values.Add(assignment.SourceFingerprint);
-        }
-
-        values.Add(canonical.Provenance.SourceReference);
-        values.Add(canonical.Provenance.SourceHash);
-        values.Add(canonical.Review.Reviewer);
-        values.Add(canonical.Review.Version.ToString(CultureInfo.InvariantCulture));
-        values.Add(canonical.Review.ReviewedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
-        return KnowledgeIdentity.Fingerprint(values.ToArray());
+            canonical.AnchorPolicy,
+            canonical.AnchorTokens,
+            canonical.QualificationSupportTokens,
+            canonical.ContextSupportTokens,
+            canonical.Assignments,
+            canonical.Provenance,
+            canonical.Review with { ReviewedAtUtc = canonical.Review.ReviewedAtUtc.ToUniversalTime() });
+        return KnowledgeIdentity.ContentHash(JsonSerializer.Serialize(payload, Options));
     }
 
     private static JsonSerializerOptions CreateOptions()
@@ -156,4 +141,15 @@ public static class ReviewedConceptSerializer
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }
+
+    private sealed record DeclarationFingerprintPayload(
+        string ConceptId,
+        string Definition,
+        ReviewedConceptAnchorPolicy AnchorPolicy,
+        IReadOnlyList<IReadOnlyList<string>> AnchorTokens,
+        IReadOnlyList<string> QualificationSupportTokens,
+        IReadOnlyList<string> ContextSupportTokens,
+        IReadOnlyList<ReviewedConceptAssignment> Assignments,
+        ReviewedConceptProvenance Provenance,
+        ReviewedConceptReview Review);
 }

@@ -42,7 +42,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "8508f3cced083e36cfd66d3d655486ec686058e6cad33036d35292ae43452216"
+      "fingerprint": "495ff5772a078c839ff135e23119bd9c2f623576d46a151ba1c01f8ce5b5e990"
     },
     {
       "conceptId": "analyzer-diagnostic-sanitization",
@@ -74,7 +74,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "0f71c979313cd8fbef0daf0cf101850e5bd3ad9cdd7f91608bb4ac04690fae3d"
+      "fingerprint": "c555068230a4f91b2233e172dc39779bf62f6b5d3addcff0f7158f150e1f7501"
     },
     {
       "conceptId": "bounded-context-selection",
@@ -116,7 +116,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "1bffdd7415acc8ace7a1ac54708afb11a9ce733236cda4d14bc74f7f7fd59ca3"
+      "fingerprint": "3041184320c9518d785d6b09c210e187881580edee4d07128a2f4301731e38bc"
     },
     {
       "conceptId": "bounded-retry",
@@ -149,7 +149,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "f18d5f1833a7dcd42cbe061bb0d3695328d4535d5f3a266ea4d173ccb695891d"
+      "fingerprint": "6890e18545117d0ccb8ca4f64710096a4b722ee6ebcfb54cbf80bb1382bcd099"
     },
     {
       "conceptId": "evaluation-result-persistence",
@@ -186,7 +186,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "5f49175c08f99749928e9e9085e2194dcd1a1b0e5391de939acde8342685d4ea"
+      "fingerprint": "373646f2d712df25357d28d024c11a015e04713f7c60ddb81a91555362b9fe16"
     },
     {
       "conceptId": "graph-integrity-validation",
@@ -218,7 +218,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "da91c363cf0ce02e1505c0e99e454e4f8a52ba3f505deaaeb41ed32696fd9fa1"
+      "fingerprint": "4b129ef190badb36edfaab2facdfa0fb59eb7a2ca64681a0ec6ad33baf46eaf2"
     },
     {
       "conceptId": "incremental-change-detection",
@@ -260,7 +260,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "5d618a5284f99d791a0d52f8d9b876f76579b9f3c4cc3241131c64114a642538"
+      "fingerprint": "146baa9907babcd9442ea6d35250aa8762f3c73d20d6329e5c9a4f8a84e51e9c"
     },
     {
       "conceptId": "initiative-analysis-persistence",
@@ -293,7 +293,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "0ae0c8288ce55d129fbdd647bb06fe950a7a7f7f7f7848f111110afb884cd590"
+      "fingerprint": "258b3151252244a0c6042e39e028231aa2cb7cd1dad4d7859f81db5a496e80de"
     },
     {
       "conceptId": "live-evaluation-suite-contract",
@@ -326,7 +326,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "dcbb1ff78b06efa42dac0351deb673c2f1ca52c7263546f51b6c65593674aada"
+      "fingerprint": "e3dd6728cf145208dc7f9cd5f922ae3cc8b4b19f4f846fa93bed7a0aeb19a84a"
     },
     {
       "conceptId": "offline-evaluation-suite-contract",
@@ -359,7 +359,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "023c3652235e7ba22b75328c1aa96dd5d7a41208ab19af9d4520484938f045c0"
+      "fingerprint": "d991c12351cb2bc592f0213c80cba99ee6b44cf27943b195d12eb259e2ba8c06"
     },
     {
       "conceptId": "outbound-validation",
@@ -400,7 +400,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "8a9054b1f2b6c89b1c8829526019d892b062ff56bea08c21bc16d25d5672c3eb"
+      "fingerprint": "9a15b4a48ccb9bd5bc4d7b13d07bf5151c9428b96725870451ad4874ef49295a"
     },
     {
       "conceptId": "project-memory-integrity-validation",
@@ -432,7 +432,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "4d4bb03e2e6186ac38ee31d4bd6800087a6c3bce56225ff382f59e443d9a44e6"
+      "fingerprint": "e6a7adb720a84817bcddfa44bb69071adeebe7a91d46a5aaf2cc852af1bb423a"
     },
     {
       "conceptId": "project-memory-manifest-contract",
@@ -464,7 +464,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "aa172bd94b63c943d48dd71b01e49fd656273ac6aa87ababcf29127b097bdc80"
+      "fingerprint": "cc5f5d9546c2fd8039c55ca69edbec71feeb82ca92283eeff8d385c60f4a736e"
     },
     {
       "conceptId": "project-memory-persistence",
@@ -495,7 +495,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "c31ad3a7bf8d262a88eae66e05441057d7afc74d2f9b960e5a9f9f1a65b041b8"
+      "fingerprint": "f598296d7ae6d6164fac3a3ea5359dd3aa03683b0ac3acfce3be0bdea30b32e8"
     },
     {
       "conceptId": "provider-boundary",
@@ -541,7 +541,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "2696a07a18278012e34d92b1b89a425ba10c570ea20c4d61c5562a2711e914ee"
+      "fingerprint": "7d833b8ff5e94728814e97ed7a010ac7b992e5b4b556af5d88eff9856617fe73"
     },
     {
       "conceptId": "raw-snapshot-protection",
@@ -578,7 +578,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "a323481ea2666f36107c21b018f927f835711fdef93f20285a08eb56dbc90553"
+      "fingerprint": "bb3d77f9a1325a5b802e1474928a543b86db0ae82a633b89a2381857ebe93042"
     },
     {
       "conceptId": "reasoning-output-contract",
@@ -610,7 +610,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "127cb9c7df29d45b1e7b6029da92df20f3d232091f8db39653ed511dcec0501a"
+      "fingerprint": "7138add95082dba13462fff5942b485f0a255365ae751d55777a7ccc7f2fd9a8"
     },
     {
       "conceptId": "recommendation-evidence-validation",
@@ -642,7 +642,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "68b009de27b27d65d47872b7fdbe42f1633b702fdd7d58af61d57608468509aa"
+      "fingerprint": "4f0aba0a8f27e590697f92ef67e8c9b8e8f9eaf06e88e2ff0e90f8d7d026597f"
     },
     {
       "conceptId": "remote-authorization",
@@ -688,7 +688,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "0482d372270561f3b23adf72c7ee1feeee30e66fedffc1f34521bc45bd58f86a"
+      "fingerprint": "a88579af0753e0229fe329dc44faea6d97f2cb9e0e01d255f21df3d1e8b8e2d1"
     },
     {
       "conceptId": "remote-preview-persistence",
@@ -720,7 +720,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "a06e5d17b108cd1a15f65f462d0ca1c91ad87f31f19927e360a828f4da09e164"
+      "fingerprint": "44fa5b7a8f131d10b02194111e74816394e216a8031a9cb60c0b0161e381c232"
     },
     {
       "conceptId": "repository-snapshot-contract",
@@ -752,7 +752,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "f3105b0e306f1d23c2baa2d9a59f615c77a2299c12233b559b8429b5e88b1ffc"
+      "fingerprint": "3ca43bf7902093d2ad6730f6c365df15ca92541e5fc96594faddee6c583f2994"
     },
     {
       "conceptId": "repository-snapshot-persistence",
@@ -784,7 +784,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "548f28cde2d3bbb91350be2a090f6343046e268a8c2c30a003253e7fd2fd23d8"
+      "fingerprint": "a8749d506d9740b8f54bf0b9fb8e0221d8f6de4b654c923467e98bd9714b63d2"
     },
     {
       "conceptId": "secret-protection",
@@ -815,7 +815,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "6f9bfa8fb56b2c2953b8ced4a8ff809139fe94bc48c5f784643f66089d8ba123"
+      "fingerprint": "7ca691fbf58e1ebafb9ef9aa06f35f92e39b83f791c0a6df82b9f5cbba90703d"
     },
     {
       "conceptId": "source-body-protection",
@@ -852,7 +852,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "ecb10c8d99590e3c21cc4ec1e6547fb02a6f2adc80295c49c4e4a51c1cdd661d"
+      "fingerprint": "945b3db0a9e6c56ac9dd06130c6a3fb19fc878151ef84b9be81edd3861f1244e"
     },
     {
       "conceptId": "token-budget-enforcement",
@@ -889,7 +889,7 @@
         "version": 1,
         "reviewedAtUtc": "2026-09-12T05:35:51.5796335+00:00"
       },
-      "fingerprint": "ee0faa9624942bf7f7ffe9699d15eecbf7c0b1e4d759aed76bb1751315a2eb49"
+      "fingerprint": "4ecd151070cf6aa0fc4324bef5effae0aac2ee5a0c5176c778ac6a76d29eadcf"
     }
   ]
 }

@@ -39,6 +39,25 @@ public sealed class ReviewedConceptSerializerTests
     }
 
     [Fact]
+    public void DeclarationFingerprint_PreservesFieldBoundariesWhenMetadataContainsNewlines()
+    {
+        var declaration = ReviewedConceptTestData.Declaration();
+        var first = declaration with
+        {
+            Provenance = new ReviewedConceptProvenance("source-a\nsource-b", "source-c")
+        };
+        var second = declaration with
+        {
+            Provenance = new ReviewedConceptProvenance("source-a", "source-b\nsource-c")
+        };
+
+        var firstFingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(first);
+        var secondFingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(second);
+
+        Assert.NotEqual(firstFingerprint, secondFingerprint);
+    }
+
+    [Fact]
     public void Deserialize_MalformedJsonThrowsSafeInvalidDataException()
     {
         var exception = Assert.Throws<InvalidDataException>(() =>
