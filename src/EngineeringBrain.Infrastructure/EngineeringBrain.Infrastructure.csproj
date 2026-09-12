@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="OpenAI" Version="2.13.0" />
     <ProjectReference Include="..\EngineeringBrain.Core\EngineeringBrain.Core.csproj" />
   </ItemGroup>
 </Project>

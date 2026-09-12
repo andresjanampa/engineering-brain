@@ -38,3 +38,12 @@ public interface IRepositorySnapshotStore
 
     Task<string> SaveAsync(RepositorySnapshot snapshot, CancellationToken cancellationToken = default);
 }
+
+public interface IReasoningProvider
+{
+    string Name { get; }
+
+    Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
+        ReasoningRequest request,
+        CancellationToken cancellationToken = default);
+}
