@@ -87,6 +87,65 @@ public sealed class ReviewedConceptValidatorTests
                 && item.ConceptId == "incomplete-concept");
     }
 
+    [Theory]
+    [InlineData("provenance-reference")]
+    [InlineData("provenance-hash")]
+    [InlineData("reviewer")]
+    [InlineData("assignment-entry")]
+    [InlineData("assignment-entity")]
+    [InlineData("assignment-source")]
+    [InlineData("assignment-fingerprint")]
+    public void Validate_NullNestedDeclarationMemberIsExcludedWithoutThrowing(string member)
+    {
+        var valid = ReviewedConceptTestData.WithFingerprint(
+            ReviewedConceptTestData.Declaration("valid-concept", "entity:business-service") with
+            {
+                AnchorPolicy = ReviewedConceptAnchorPolicy.NotRequired,
+                AnchorTokens = [],
+                QualificationSupportTokens = []
+            });
+        var incomplete = ReviewedConceptTestData.Declaration("nested-incomplete", "entity:model");
+        incomplete = member switch
+        {
+            "provenance-reference" => incomplete with
+            {
+                Provenance = incomplete.Provenance with { SourceReference = null! }
+            },
+            "provenance-hash" => incomplete with
+            {
+                Provenance = incomplete.Provenance with { SourceHash = null! }
+            },
+            "reviewer" => incomplete with
+            {
+                Review = incomplete.Review with { Reviewer = null! }
+            },
+            "assignment-entry" => incomplete with { Assignments = [null!] },
+            "assignment-entity" => incomplete with
+            {
+                Assignments = [incomplete.Assignments[0] with { EntityId = null! }]
+            },
+            "assignment-source" => incomplete with
+            {
+                Assignments = [incomplete.Assignments[0] with { SourceReference = null! }]
+            },
+            "assignment-fingerprint" => incomplete with
+            {
+                Assignments = [incomplete.Assignments[0] with { SourceFingerprint = null! }]
+            },
+            _ => throw new InvalidOperationException()
+        };
+
+        var result = new ReviewedConceptValidator().Validate(
+            ReviewedConceptTestData.Catalog() with { Declarations = [valid, incomplete] },
+            ReviewedConceptTestData.Evidence());
+
+        Assert.True(result.CatalogIsValid);
+        Assert.Single(result.Declarations, item => item.ConceptId == "valid-concept");
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC208"
+            && item.Scope == ReviewedConceptDiagnosticScope.Declaration
+            && item.ConceptId == "nested-incomplete");
+    }
+
     [Fact]
     public void Validate_InvalidDeclarationAndAssignmentAreLocalized()
     {

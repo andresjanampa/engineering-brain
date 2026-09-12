@@ -117,8 +117,15 @@ public sealed partial class ReviewedConceptValidator
             || declaration.ContextSupportTokens is null
             || declaration.ContextSupportTokens.Any(token => token is null)
             || declaration.Assignments is null
+            || declaration.Assignments.Any(assignment => assignment is null
+                || assignment.EntityId is null
+                || assignment.SourceReference is null
+                || assignment.SourceFingerprint is null)
             || declaration.Provenance is null
+            || declaration.Provenance.SourceReference is null
+            || declaration.Provenance.SourceHash is null
             || declaration.Review is null
+            || declaration.Review.Reviewer is null
             || declaration.Fingerprint is null)
         {
             diagnostics.Add(DeclarationError(
