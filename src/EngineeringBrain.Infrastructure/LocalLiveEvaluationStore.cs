@@ -94,7 +94,10 @@ public sealed partial class LocalLiveEvaluationStore
                 .AppendLine($"- Status: `{item.Status}`")
                 .AppendLine($"- Initiative: `{item.InitiativeFileName}` / `{item.InitiativeHash}`")
                 .AppendLine($"- Capability hit rate: `{item.UnderstandingMetrics?.RequiredCapabilityHitRate:F3}`")
-                .AppendLine($"- Golden/live MRR: `{item.RetrievalComparison?.Golden.MeanReciprocalRank:F3}` / `{item.RetrievalComparison?.Actual.MeanReciprocalRank:F3}`")
+                .AppendLine($"- Golden retrieval Recall@5/10/MRR: `{FormatRetrieval(item.RetrievalComparison?.Golden)}`")
+                .AppendLine($"- Live retrieval Recall@5/10/MRR: `{FormatRetrieval(item.RetrievalComparison?.Actual)}`")
+                .AppendLine($"- Golden missing required retrieval entities: `{FormatMissing(item.RetrievalComparison?.Golden.MissingRequiredEntities)}`")
+                .AppendLine($"- Live missing required retrieval entities: `{FormatMissing(item.RetrievalComparison?.Actual.MissingRequiredEntities)}`")
                 .AppendLine($"- Evidence validation: `{item.Call2Metrics?.EvidenceValidationRate:F3}`")
                 .AppendLine($"- Invalid evidence: `{item.Call2Metrics?.InvalidEvidence ?? 0}`")
                 .AppendLine($"- Policy outcome: `{item.PolicyOutcome?.ToString() ?? "n/a"}`")
@@ -102,6 +105,12 @@ public sealed partial class LocalLiveEvaluationStore
                 .AppendLine($"- Blocked recommendation escapes: `{item.PolicyMetrics?.BlockedRecommendationEscapeCount ?? 0}`")
                 .AppendLine($"- Error: `{Redact(item.ErrorMessage) ?? "none"}`").AppendLine();
             AppendJson(builder, "CALL #1 structured output", item.Understanding);
+            AppendJson(builder, "Understanding expectation matches", item.UnderstandingMetrics is null ? null : new
+            {
+                item.UnderstandingMetrics.RequiredCapabilityMatches,
+                item.UnderstandingMetrics.AcceptableCapabilityMatches,
+                item.UnderstandingMetrics.UnknownTopicMatches
+            });
             AppendJson(builder, "Retrieved candidates", item.Retrieval is null ? null : new
             {
                 Projects = item.Retrieval.Projects.Select(value => new { value.ProjectId, value.Name, value.Score }),
@@ -123,6 +132,14 @@ public sealed partial class LocalLiveEvaluationStore
         }
         return builder.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
     }
+
+    private static string FormatRetrieval(LiveRetrievalMetrics? metrics) => metrics is null
+        ? "n/a/n/a/n/a"
+        : $"{metrics.RecallAt5:F3}/{metrics.RecallAt10:F3}/{metrics.MeanReciprocalRank:F3}";
+
+    private static string FormatMissing(IReadOnlyList<string>? values) => values is null
+        ? "n/a"
+        : values.Count == 0 ? "none" : string.Join(", ", values);
 
     public static string? Redact(string? value)
     {

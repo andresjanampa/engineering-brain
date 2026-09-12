@@ -25,10 +25,19 @@ public sealed record LiveEvaluationCase(
     LiveAnalysisExpectations AnalysisExpectations,
     LivePolicyExpectations PolicyExpectations);
 
+public sealed record LiveLexicalExpectationAlternatives(
+    string Id,
+    IReadOnlyList<IReadOnlyList<string>> Alternatives);
+
 public sealed record LiveUnderstandingExpectations(
     IReadOnlyList<string> RequiredCapabilities,
     IReadOnlyList<string> AcceptableCapabilities,
-    IReadOnlyList<string> ExpectedUnknownTopics);
+    IReadOnlyList<string> ExpectedUnknownTopics)
+{
+    public IReadOnlyList<LiveLexicalExpectationAlternatives> CapabilityAlternatives { get; init; } = [];
+
+    public IReadOnlyList<LiveLexicalExpectationAlternatives> UnknownTopicAlternatives { get; init; } = [];
+}
 
 public sealed record LiveRepositoryExpectations(
     IReadOnlyList<string> RequiredEntities,
@@ -79,7 +88,20 @@ public sealed record LiveUnderstandingMetrics(
     IReadOnlyList<string> MissingSearchTerms,
     IReadOnlyList<string> ExtraSearchTerms,
     IReadOnlyList<string> PotentiallyHarmfulSearchTerms,
-    bool SummaryRequiresHumanReview);
+    bool SummaryRequiresHumanReview)
+{
+    public IReadOnlyList<LiveLexicalExpectationMatch>? RequiredCapabilityMatches { get; init; }
+
+    public IReadOnlyList<LiveLexicalExpectationMatch>? AcceptableCapabilityMatches { get; init; }
+
+    public IReadOnlyList<LiveLexicalExpectationMatch>? UnknownTopicMatches { get; init; }
+}
+
+public sealed record LiveLexicalExpectationMatch(
+    string Id,
+    bool Matched,
+    IReadOnlyList<string>? MatchedAlternative,
+    string? MatchedActual);
 
 public sealed record LiveRetrievalMetrics(
     double RecallAt5,
@@ -87,7 +109,12 @@ public sealed record LiveRetrievalMetrics(
     double MeanReciprocalRank,
     int? FirstRequiredRank,
     double ProjectRecallAt3,
-    double ProjectMeanReciprocalRank);
+    double ProjectMeanReciprocalRank)
+{
+    public IReadOnlyList<string>? MissingRequiredEntities { get; init; }
+
+    public IReadOnlyList<string>? MissingRequiredProjects { get; init; }
+}
 
 public sealed record LiveRetrievalComparison(
     LiveRetrievalMetrics Golden,

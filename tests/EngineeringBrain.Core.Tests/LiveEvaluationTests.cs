@@ -143,6 +143,118 @@ public sealed class LiveEvaluationTests
     }
 
     [Fact]
+    public void UnderstandingMetrics_UseFixtureAlternativesWithinOneActualItem()
+    {
+        var item = Case("alternatives") with
+        {
+            UnderstandingExpectations = new LiveUnderstandingExpectations(
+                [],
+                [],
+                ["authorization", "repository scope", "split topic", "missing topic"])
+            {
+                UnknownTopicAlternatives =
+                [
+                    Alternatives("authorization", ["authorization"], ["consent"]),
+                    Alternatives("repository scope", ["repository", "scope"], ["files", "included"]),
+                    Alternatives("split topic", ["alpha", "beta"]),
+                    Alternatives("missing topic", ["retention"])
+                ]
+            }
+        };
+        var actual = Understanding("business") with
+        {
+            Unknowns = ["Users grant authorization and consent", "Which files are included?", "alpha", "beta"]
+        };
+
+        var metrics = new LiveEvaluationMetricCalculator().EvaluateUnderstanding(
+            item, actual, ProjectMemoryTestFactory.Create());
+
+        Assert.Equal(2, metrics.ExpectedUnknownTopicsHit);
+        Assert.Equal(0.5, metrics.UnknownTopicCoverage);
+        var authorization = Assert.Single(metrics.UnknownTopicMatches!, value => value.Id == "authorization");
+        Assert.True(authorization.Matched);
+        Assert.Equal(["authorization"], authorization.MatchedAlternative);
+        var scope = Assert.Single(metrics.UnknownTopicMatches!, value => value.Id == "repository scope");
+        Assert.Equal(["files", "included"], scope.MatchedAlternative);
+        Assert.Contains("split topic", metrics.MissingExpectedUnknownTopics);
+        Assert.Contains("missing topic", metrics.MissingExpectedUnknownTopics);
+    }
+
+    [Fact]
+    public void UnderstandingMetrics_CapabilityAlternativesAcceptParaphraseButNotUnrelatedText()
+    {
+        var item = Case("capabilities") with
+        {
+            UnderstandingExpectations = new LiveUnderstandingExpectations(
+                ["remote transmission", "database migration"],
+                [],
+                [])
+            {
+                CapabilityAlternatives =
+                [
+                    Alternatives("remote transmission", ["remote", "transmission"], ["repository", "transmission"])
+                ]
+            }
+        };
+        var actual = Understanding("business") with
+        {
+            TechnicalCapabilities = ["Automatic transmission of repository data"]
+        };
+
+        var metrics = new LiveEvaluationMetricCalculator().EvaluateUnderstanding(
+            item, actual, ProjectMemoryTestFactory.Create());
+
+        Assert.Equal(0.5, metrics.RequiredCapabilityHitRate);
+        Assert.Equal(["repository", "transmission"], metrics.RequiredCapabilityMatches!
+            .Single(value => value.Id == "remote transmission").MatchedAlternative);
+        Assert.Contains("database migration", metrics.MissingRequiredCapabilities);
+
+        var unrelated = new LiveEvaluationMetricCalculator().EvaluateUnderstanding(
+            item,
+            actual with { TechnicalCapabilities = ["Send email notifications"] },
+            ProjectMemoryTestFactory.Create());
+        Assert.Contains("remote transmission", unrelated.MissingRequiredCapabilities);
+    }
+
+    [Fact]
+    public async Task SecurityFixture_MatchesLatestRealUnderstandingWithoutHidingMissingPrecisionTopic()
+    {
+        var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(FindRepositoryFile("evaluations", "live-suite.json"));
+        var item = suite.Cases.Single(value => value.Id == "live-security-repository-upload");
+        var actual = item.GoldenUnderstanding with
+        {
+            TechnicalCapabilities =
+            [
+                "Repository-wide file collection and packaging",
+                "Automatic upload or transmission of repository data",
+                "LLM context ingestion using repository contents",
+                "Configuration or control for enabling automatic repository transmission"
+            ],
+            SearchTerms = ["repository upload", "complete repository context", "LLM provider integration"],
+            Unknowns =
+            [
+                "Which LLM provider or providers are supported",
+                "Whether transmission is enabled by default",
+                "How users grant consent or configure the feature",
+                "Which files or directories are included or excluded",
+                "How secrets, credentials, and other sensitive data are detected or redacted",
+                "Maximum repository size or upload limits",
+                "Transport protocol and authentication method",
+                "Data retention, logging, and deletion policies"
+            ]
+        };
+
+        var metrics = new LiveEvaluationMetricCalculator().EvaluateUnderstanding(
+            item, actual, ProjectMemoryTestFactory.Create());
+
+        Assert.Equal(1, metrics.RequiredCapabilityHitRate);
+        Assert.Equal(6, metrics.ExpectedUnknownTopicsHit);
+        Assert.Equal(6d / 7d, metrics.UnknownTopicCoverage, 10);
+        Assert.Equal(["precision success criteria"], metrics.MissingExpectedUnknownTopics);
+        Assert.False(metrics.UnknownTopicMatches!.Single(value => value.Id == "precision success criteria").Matched);
+    }
+
+    [Fact]
     public async Task GoldenVsLiveRetrieval_ReportsInterpretationDamage()
     {
         using var fixture = new InitiativeMemoryFixture();
@@ -160,6 +272,36 @@ public sealed class LiveEvaluationTests
         Assert.Equal(1, comparison.Golden.RecallAt10);
         Assert.Equal(0, comparison.Actual.RecallAt10);
         Assert.True(comparison.MeanReciprocalRankDelta < 0);
+        Assert.Empty(comparison.Golden.MissingRequiredEntities!);
+        Assert.Contains("Demo.Business.BusinessService", comparison.Actual.MissingRequiredEntities!);
+
+        var summary = LiveEvaluationMetricCalculator.SummarizeRetrieval(
+            [SuccessfulResult("retrieval", 1, [], []) with { RetrievalComparison = comparison }]);
+        Assert.NotNull(summary);
+        Assert.Equal(comparison.Golden.RecallAt5, summary.Golden.RecallAt5);
+        Assert.Equal(comparison.Actual.RecallAt5, summary.Actual.RecallAt5);
+        Assert.Equal(summary.Actual.RecallAt5 - summary.Golden.RecallAt5, summary.RecallAt5Delta);
+    }
+
+    [Fact]
+    public void RetrievalSummary_PreservesZeroGoldenZeroLiveAndZeroDeltaSeparately()
+    {
+        var zero = new LiveRetrievalMetrics(0, 0, 0, null, 0, 0);
+        var comparison = LiveEvaluationMetricCalculator.CompareRetrieval(zero, zero);
+
+        var summary = LiveEvaluationMetricCalculator.SummarizeRetrieval(
+            [SuccessfulResult("zero", 1, [], []) with { RetrievalComparison = comparison }]);
+
+        Assert.NotNull(summary);
+        Assert.Equal(0, summary.Golden.RecallAt5);
+        Assert.Equal(0, summary.Golden.RecallAt10);
+        Assert.Equal(0, summary.Golden.MeanReciprocalRank);
+        Assert.Equal(0, summary.Actual.RecallAt5);
+        Assert.Equal(0, summary.Actual.RecallAt10);
+        Assert.Equal(0, summary.Actual.MeanReciprocalRank);
+        Assert.Equal(0, summary.RecallAt5Delta);
+        Assert.Equal(0, summary.RecallAt10Delta);
+        Assert.Equal(0, summary.MeanReciprocalRankDelta);
     }
 
     [Fact]
@@ -178,8 +320,13 @@ public sealed class LiveEvaluationTests
         Assert.Equal(2, result.LiveResultSchemaVersion);
         var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
         Assert.Equal(2, persisted.LiveResultSchemaVersion);
+        Assert.NotNull(Assert.Single(persisted.Cases).UnderstandingMetrics!.RequiredCapabilityMatches);
         var review = await File.ReadAllTextAsync(result.ReviewPath);
         Assert.Contains("Initiative understanding [1-5]:", review, StringComparison.Ordinal);
+        Assert.Contains("Golden retrieval Recall@5/10/MRR", review, StringComparison.Ordinal);
+        Assert.Contains("Live retrieval Recall@5/10/MRR", review, StringComparison.Ordinal);
+        Assert.Contains("Understanding expectation matches", review, StringComparison.Ordinal);
+        Assert.Contains("missing required retrieval entities", review, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Policy activation accuracy", review, StringComparison.Ordinal);
         Assert.DoesNotContain("OPENAI_API_KEY", review, StringComparison.Ordinal);
     }
@@ -519,6 +666,10 @@ public sealed class LiveEvaluationTests
         ["BusinessService"],
         ["Execute"],
         []);
+
+    private static LiveLexicalExpectationAlternatives Alternatives(
+        string id,
+        params IReadOnlyList<string>[] alternatives) => new(id, alternatives);
 
     private static LiveRepositoryExpectations RepositoryExpectations() => new(
         ["Demo.Business.BusinessService"],

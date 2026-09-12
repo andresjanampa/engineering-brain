@@ -523,13 +523,16 @@ internal static class BrainCli
     private static void WriteLiveEvaluation(LiveEvaluationRun result)
     {
         var aggregate = result.Aggregate;
+        var retrieval = LiveEvaluationMetricCalculator.SummarizeRetrieval(result.Cases);
         WriteSection("Live Results");
         Console.WriteLine($"Run: {result.RunId}");
         Console.WriteLine($"Cases succeeded/failed: {aggregate.CasesSucceeded}/{aggregate.CasesFailed}");
         Console.WriteLine($"Security blocked: {aggregate.SecurityBlocked}; structured failures: {aggregate.StructuredOutputFailures}");
         Console.WriteLine($"CALL #1 capability hit rate: {aggregate.CapabilityHitRate:F3}");
         Console.WriteLine($"Unknown detection accuracy: {aggregate.UnknownDetectionAccuracy:F3}");
-        Console.WriteLine($"Retrieval delta Recall@5/Recall@10/MRR: {aggregate.AverageRecallAt5Delta:F3}/{aggregate.AverageRecallAt10Delta:F3}/{aggregate.AverageMeanReciprocalRankDelta:F3}");
+        Console.WriteLine($"Golden retrieval Recall@5/10/MRR: {FormatRetrieval(retrieval?.Golden)}");
+        Console.WriteLine($"Live retrieval Recall@5/10/MRR: {FormatRetrieval(retrieval?.Actual)}");
+        Console.WriteLine($"Retrieval delta Recall@5/10/MRR: {(retrieval is null ? "n/a/n/a/n/a" : $"{retrieval.RecallAt5Delta:F3}/{retrieval.RecallAt10Delta:F3}/{retrieval.MeanReciprocalRankDelta:F3}")}");
         Console.WriteLine($"CALL #2 decision hit rate: {aggregate.ExpectedDecisionHitRate:F3}");
         Console.WriteLine($"Evidence validation: {aggregate.EvidenceValidationRate:F3}; invalid: {aggregate.InvalidEvidence}; fabricated accepted: {aggregate.FabricatedEntitiesAccepted}");
         Console.WriteLine($"Analysis status accuracy: {aggregate.AnalysisStatusAccuracy:F3}");
@@ -543,6 +546,10 @@ internal static class BrainCli
         Console.WriteLine($"Summary: {result.SummaryPath}");
         Console.WriteLine($"Review: {result.ReviewPath}");
     }
+
+    private static string FormatRetrieval(LiveRetrievalMetrics? metrics) => metrics is null
+        ? "n/a/n/a/n/a"
+        : $"{metrics.RecallAt5:F3}/{metrics.RecallAt10:F3}/{metrics.MeanReciprocalRank:F3}";
 
     private static void WriteEvaluation(EvaluationRunResult result, string baselinePath)
     {

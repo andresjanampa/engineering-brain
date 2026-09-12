@@ -30,12 +30,18 @@ public sealed class LiveEvaluationMetricCalculator
             Coverage("unknowns", golden.Unknowns, actual.Unknowns)
         };
         var capabilityValues = actual.TechnicalCapabilities.Concat(actual.SearchTerms).ToArray();
-        var required = item.UnderstandingExpectations.RequiredCapabilities;
-        var requiredHits = required.Where(value => Matches(value, capabilityValues)).ToArray();
-        var acceptableHits = item.UnderstandingExpectations.AcceptableCapabilities
-            .Where(value => Matches(value, capabilityValues)).ToArray();
+        var expectations = item.UnderstandingExpectations;
+        var required = expectations.RequiredCapabilities;
+        var requiredMatches = required.Select(value => MatchExpectation(
+            value, expectations.CapabilityAlternatives, capabilityValues, ignoreConnectives: false)).ToArray();
+        var requiredHits = requiredMatches.Where(value => value.Matched).Select(value => value.Id).ToArray();
+        var acceptableMatches = expectations.AcceptableCapabilities.Select(value => MatchExpectation(
+            value, expectations.CapabilityAlternatives, capabilityValues, ignoreConnectives: false)).ToArray();
+        var acceptableHits = acceptableMatches.Where(value => value.Matched).Select(value => value.Id).ToArray();
         var expectedUnknownTopics = item.UnderstandingExpectations.ExpectedUnknownTopics;
-        var unknownTopicHits = expectedUnknownTopics.Where(topic => TopicMatches(topic, actual.Unknowns)).ToArray();
+        var unknownTopicMatches = expectedUnknownTopics.Select(value => MatchExpectation(
+            value, expectations.UnknownTopicAlternatives, actual.Unknowns, ignoreConnectives: true)).ToArray();
+        var unknownTopicHits = unknownTopicMatches.Where(value => value.Matched).Select(value => value.Id).ToArray();
         var goldenSearchTokens = _normalizer.Tokenize(golden.SearchTerms).ToHashSet(StringComparer.Ordinal);
         var actualSearchTokens = _normalizer.Tokenize(actual.SearchTerms).ToHashSet(StringComparer.Ordinal);
         var extra = actualSearchTokens.Except(goldenSearchTokens, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -55,24 +61,43 @@ public sealed class LiveEvaluationMetricCalculator
             golden.SearchTerms.Where(value => !Matches(value, actual.SearchTerms)).ToArray(),
             extra,
             extra.Where(value => !repositoryTokens.Contains(value)).ToArray(),
-            SummaryRequiresHumanReview: true);
+            SummaryRequiresHumanReview: true)
+        {
+            RequiredCapabilityMatches = requiredMatches,
+            AcceptableCapabilityMatches = acceptableMatches,
+            UnknownTopicMatches = unknownTopicMatches
+        };
     }
 
     public LiveRetrievalMetrics EvaluateRetrieval(
         CandidateRetrievalResult retrieval,
         LiveRepositoryExpectations expected)
     {
-        var entityRanks = expected.RequiredEntities.Select(required => FirstRank(
-            retrieval.Components, candidate => MatchesEntity(candidate, required))).ToArray();
-        var projectRanks = expected.RequiredProjects.Select(required => FirstRank(
-            retrieval.Projects, candidate => MatchesProject(candidate, required))).ToArray();
+        var entityResults = expected.RequiredEntities.Select(required => new
+        {
+            Expected = required,
+            Rank = FirstRank(retrieval.Components, candidate => MatchesEntity(candidate, required))
+        }).ToArray();
+        var projectResults = expected.RequiredProjects.Select(required => new
+        {
+            Expected = required,
+            Rank = FirstRank(retrieval.Projects, candidate => MatchesProject(candidate, required))
+        }).ToArray();
+        var entityRanks = entityResults.Select(value => value.Rank).ToArray();
+        var projectRanks = projectResults.Select(value => value.Rank).ToArray();
         return new LiveRetrievalMetrics(
             Recall(entityRanks, 5),
             Recall(entityRanks, 10),
             ReciprocalRank(entityRanks),
             entityRanks.Where(rank => rank is not null).Min(),
             Recall(projectRanks, 3),
-            ReciprocalRank(projectRanks));
+            ReciprocalRank(projectRanks))
+        {
+            MissingRequiredEntities = entityResults.Where(value => value.Rank is null)
+                .Select(value => value.Expected).ToArray(),
+            MissingRequiredProjects = projectResults.Where(value => value.Rank is null)
+                .Select(value => value.Expected).ToArray()
+        };
     }
 
     public static LiveRetrievalComparison CompareRetrieval(
@@ -83,6 +108,28 @@ public sealed class LiveEvaluationMetricCalculator
             actual.RecallAt5 - golden.RecallAt5,
             actual.RecallAt10 - golden.RecallAt10,
             actual.MeanReciprocalRank - golden.MeanReciprocalRank);
+
+    public static LiveRetrievalComparison? SummarizeRetrieval(
+        IReadOnlyList<LiveEvaluationCaseResult> results)
+    {
+        var comparisons = results.Where(value => value.RetrievalComparison is not null)
+            .Select(value => value.RetrievalComparison!).ToArray();
+        if (comparisons.Length == 0) return null;
+
+        LiveRetrievalMetrics Average(Func<LiveRetrievalComparison, LiveRetrievalMetrics> select)
+        {
+            var values = comparisons.Select(select).ToArray();
+            return new LiveRetrievalMetrics(
+                values.Average(value => value.RecallAt5),
+                values.Average(value => value.RecallAt10),
+                values.Average(value => value.MeanReciprocalRank),
+                null,
+                values.Average(value => value.ProjectRecallAt3),
+                values.Average(value => value.ProjectMeanReciprocalRank));
+        }
+
+        return CompareRetrieval(Average(value => value.Golden), Average(value => value.Actual));
+    }
 
     public LiveCall2Metrics EvaluateAnalysis(
         LiveEvaluationCase item,
@@ -247,15 +294,36 @@ public sealed class LiveEvaluationMetricCalculator
 
     private bool TopicMatches(string expected, IEnumerable<string> actual)
     {
-        // A topic matches when all normalized non-connective tokens occur in one actual unknown or question.
-        var expectedTokens = _normalizer.Tokenize(expected)
-            .Where(token => token != "or")
-            .ToArray();
-        return expectedTokens.Length > 0 && actual.Any(value =>
+        return MatchExpectation(expected, [], actual, ignoreConnectives: true).Matched;
+    }
+
+    private LiveLexicalExpectationMatch MatchExpectation(
+        string id,
+        IReadOnlyList<LiveLexicalExpectationAlternatives> configuredAlternatives,
+        IEnumerable<string> actual,
+        bool ignoreConnectives)
+    {
+        var configured = configuredAlternatives.SingleOrDefault(value => value.Id.Equals(id, StringComparison.Ordinal));
+        IReadOnlyList<IReadOnlyList<string>> alternatives = configured?.Alternatives
+            ?? [new[] { id }];
+        var actualItems = actual.Select(value => new
         {
-            var actualTokens = _normalizer.Tokenize(value).ToHashSet(StringComparer.Ordinal);
-            return expectedTokens.All(actualTokens.Contains);
-        });
+            Value = value,
+            Tokens = _normalizer.Tokenize(value).ToHashSet(StringComparer.Ordinal)
+        }).ToArray();
+
+        foreach (var alternative in alternatives)
+        {
+            var tokens = _normalizer.Tokenize(alternative)
+                .Where(token => !ignoreConnectives || token != "or")
+                .ToArray();
+            if (tokens.Length == 0) continue;
+            var matched = actualItems.FirstOrDefault(value => tokens.All(value.Tokens.Contains));
+            if (matched is not null)
+                return new LiveLexicalExpectationMatch(id, true, alternative.ToArray(), matched.Value);
+        }
+
+        return new LiveLexicalExpectationMatch(id, false, null, null);
     }
 
     private HashSet<string> RepositoryTokens(RepositorySnapshot snapshot) => _normalizer.Tokenize(
