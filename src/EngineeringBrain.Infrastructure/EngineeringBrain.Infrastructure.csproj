@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\EngineeringBrain.Core\EngineeringBrain.Core.csproj" />
+  </ItemGroup>
+</Project>
