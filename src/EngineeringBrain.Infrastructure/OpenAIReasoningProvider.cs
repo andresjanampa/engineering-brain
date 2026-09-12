@@ -77,6 +77,12 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
         ArgumentNullException.ThrowIfNull(request);
         var stopwatch = Stopwatch.StartNew();
         var failure = "The provider did not return a result.";
+        var structuredOutputFailure = false;
+        var hasReportedUsage = false;
+        var actualInputTokens = 0;
+        var cachedInputTokens = 0;
+        var actualOutputTokens = 0;
+        var reasoningTokens = 0;
         var reasoningEffort = _options.GetReasoningEffort(request.Stage);
         for (var attempt = 0; attempt <= _options.MaximumRetries; attempt++)
         {
@@ -110,6 +116,14 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
                 options.InputItems.Add(ResponseItem.CreateSystemMessageItem(request.SystemInstructions));
                 options.InputItems.Add(ResponseItem.CreateUserMessageItem(request.UserData));
                 ResponseResult response = await _client.CreateResponseAsync(options, timeout.Token);
+                if (response.Usage is not null)
+                {
+                    hasReportedUsage = true;
+                    actualInputTokens += response.Usage.InputTokenCount;
+                    cachedInputTokens += response.Usage.InputTokenDetails?.CachedTokenCount ?? 0;
+                    actualOutputTokens += response.Usage.OutputTokenCount;
+                    reasoningTokens += response.Usage.OutputTokenDetails?.ReasoningTokenCount ?? 0;
+                }
                 var json = response.GetOutputText();
                 var value = JsonSerializer.Deserialize<T>(json, JsonOptions)
                     ?? throw new JsonException("Structured response was empty.");
@@ -120,16 +134,18 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
                         Name,
                         request.Model,
                         request.EstimatedInputTokens,
-                        response.Usage?.InputTokenCount,
-                        response.Usage?.InputTokenDetails?.CachedTokenCount,
-                        response.Usage?.OutputTokenCount,
+                        hasReportedUsage ? actualInputTokens : null,
+                        hasReportedUsage ? cachedInputTokens : null,
+                        hasReportedUsage ? actualOutputTokens : null,
                         stopwatch.ElapsedMilliseconds,
                         attempt,
-                        reasoningEffort));
+                        reasoningEffort,
+                        hasReportedUsage ? reasoningTokens : null));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 failure = "The reasoning provider timed out.";
+                structuredOutputFailure = false;
             }
             catch (OperationCanceledException)
             {
@@ -138,20 +154,25 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
             catch (JsonException)
             {
                 failure = "The provider returned an invalid structured response.";
-            }
-            catch (Exception) when (attempt < _options.MaximumRetries)
-            {
-                failure = "The provider request failed.";
+                structuredOutputFailure = true;
             }
             catch (Exception)
             {
-                throw new InvalidOperationException(
-                    $"OpenAI reasoning failed during {request.Stage}. No request content or credential was logged.");
+                failure = "The provider request failed.";
+                structuredOutputFailure = false;
             }
         }
 
-        throw new InvalidOperationException(
-            $"OpenAI returned no valid structured result during {request.Stage} after {_options.MaximumRetries + 1} attempts. {failure}");
+        throw new ReasoningProviderException(
+            request.Stage,
+            structuredOutputFailure,
+            stopwatch.ElapsedMilliseconds,
+            _options.MaximumRetries,
+            $"OpenAI returned no valid structured result during {request.Stage} after {_options.MaximumRetries + 1} attempts. {failure} No request content or credential was logged.",
+            hasReportedUsage ? actualInputTokens : null,
+            hasReportedUsage ? cachedInputTokens : null,
+            hasReportedUsage ? actualOutputTokens : null,
+            hasReportedUsage ? reasoningTokens : null);
     }
     private static JsonSerializerOptions CreateJsonOptions()
     {

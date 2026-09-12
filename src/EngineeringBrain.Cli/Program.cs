@@ -27,6 +27,10 @@ internal static class BrainCli
         {
             return await RunEvaluationAsync(args);
         }
+        if (args[0].Equals("eval-live", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunLiveEvaluationAsync(args);
+        }
 
         var maximumArguments = isMemorySync ? 3 : 2;
         if ((!isScan && !isMemorySync) || args.Length > maximumArguments)
@@ -312,6 +316,138 @@ internal static class BrainCli
         }
     }
 
+    private static async Task<int> RunLiveEvaluationAsync(string[] args)
+    {
+        if (!TryParseLiveEvaluation(args, out var options, out var error))
+        {
+            Console.Error.WriteLine(error);
+            WriteUsage();
+            return 2;
+        }
+
+        using var cancellation = CreateCancellationSource();
+        try
+        {
+            var suitePath = File.Exists(options.InputPath)
+                ? options.InputPath
+                : Path.Combine(options.InputPath, "evaluations", "live-suite.json");
+            var repositoryPath = File.Exists(options.InputPath)
+                ? new RepositoryRootLocator().Locate(Path.GetDirectoryName(options.InputPath)!)
+                : options.InputPath;
+            var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(suitePath, cancellation.Token);
+            var plan = LiveEvaluationPlanner.Create(suite, options.Runs, options.CaseIds);
+            var providerOptions = OpenAIReasoningProviderOptions.FromEnvironment() with
+            {
+                InterpretationReasoningEffort = options.InterpretationEffort,
+                AnalysisReasoningEffort = options.AnalysisEffort
+            };
+            var interpretationEffort = providerOptions.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
+            var analysisEffort = providerOptions.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
+            string? apiKey = null;
+            if (!options.Preview)
+                apiKey = LiveEvaluationAuthorization.Authorize(options.FakeProvider, options.AllowRemote);
+
+            var scan = await AnalyzeRepositoryAsync(repositoryPath, cancellation.Token);
+            var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            WriteLivePreRun(plan, scan.Snapshot, options, providerOptions.MaximumRetries,
+                interpretationEffort, analysisEffort);
+            if (options.Preview) return 0;
+
+            LivePricingCatalog? pricing = options.PricingPath is null
+                ? null
+                : await LivePricingCatalogLoader.LoadAsync(options.PricingPath, cancellation.Token);
+            var providerName = options.FakeProvider ? "Fake" : "OpenAI";
+            IReasoningProvider Factory(LiveEvaluationCase item, int runNumber) => options.FakeProvider
+                ? new FakeLiveReasoningProvider(item, memory.SourceSnapshot, runNumber, interpretationEffort, analysisEffort)
+                : new OpenAIReasoningProvider(apiKey!, providerOptions);
+            var result = await new LiveEvaluationService().RunAsync(
+                plan, suitePath, memory, providerName, Factory,
+                options.InterpretationModel, options.ReasoningModel,
+                interpretationEffort, analysisEffort, pricing, cancellation.Token);
+            WriteLiveEvaluation(result);
+            return result.Aggregate.CasesFailed == 0
+                && result.Aggregate.FabricatedEntitiesAccepted == 0
+                && result.Aggregate.SourceBodyOutbound == 0
+                && result.Aggregate.SecretOutbound == 0
+                && result.Aggregate.AbsolutePathOutbound == 0
+                && result.Aggregate.RawSnapshotOutbound == 0 ? 0 : 3;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Command cancelled.");
+            return 130;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or ArgumentException or InvalidOperationException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            Console.Error.WriteLine($"Live evaluation failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static bool TryParseLiveEvaluation(
+        string[] args,
+        out LiveEvaluationOptions options,
+        out string error)
+    {
+        var input = Environment.CurrentDirectory;
+        var positionalSeen = false;
+        var allowRemote = false;
+        var fakeProvider = false;
+        var preview = false;
+        var runs = 1;
+        var caseIds = new List<string>();
+        string? pricingPath = null;
+        var interpretationModel = Environment.GetEnvironmentVariable("ENGINEERING_BRAIN_INTERPRETATION_MODEL") ?? "gpt-5.6-luna";
+        var reasoningModel = Environment.GetEnvironmentVariable("ENGINEERING_BRAIN_REASONING_MODEL") ?? "gpt-5.6-sol";
+        var defaults = OpenAIReasoningProviderOptions.FromEnvironment();
+        var interpretationEffort = defaults.InterpretationReasoningEffort;
+        var analysisEffort = defaults.AnalysisReasoningEffort;
+        error = string.Empty;
+        for (var index = 1; index < args.Length; index++)
+        {
+            switch (args[index])
+            {
+                case "--allow-remote": allowRemote = true; break;
+                case "--fake-provider": fakeProvider = true; break;
+                case "--preview": preview = true; break;
+                case "--runs" when index + 1 < args.Length && int.TryParse(args[++index], out runs): break;
+                case "--case" when index + 1 < args.Length: caseIds.Add(args[++index]); break;
+                case "--pricing" when index + 1 < args.Length: pricingPath = Path.GetFullPath(args[++index]); break;
+                case "--interpretation-model" when index + 1 < args.Length: interpretationModel = args[++index]; break;
+                case "--reasoning-model" when index + 1 < args.Length: reasoningModel = args[++index]; break;
+                case "--interpretation-effort" when index + 1 < args.Length: interpretationEffort = args[++index]; break;
+                case "--analysis-effort" when index + 1 < args.Length: analysisEffort = args[++index]; break;
+                default:
+                    if (!args[index].StartsWith("--", StringComparison.Ordinal) && !positionalSeen)
+                    {
+                        input = Path.GetFullPath(args[index]);
+                        positionalSeen = true;
+                        break;
+                    }
+                    error = $"Unknown, duplicate, or incomplete eval-live option: {args[index]}";
+                    options = null!;
+                    return false;
+            }
+        }
+        if (preview && (allowRemote || fakeProvider))
+        {
+            error = "--preview cannot be combined with --allow-remote or --fake-provider.";
+            options = null!;
+            return false;
+        }
+        if (interpretationModel.Contains("astra", StringComparison.OrdinalIgnoreCase)
+            || reasoningModel.Contains("astra", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Astra models are outside the live evaluation policy for this iteration.";
+            options = null!;
+            return false;
+        }
+        options = new LiveEvaluationOptions(input, allowRemote, fakeProvider, preview, runs, caseIds,
+            pricingPath, interpretationModel, reasoningModel, interpretationEffort, analysisEffort);
+        return true;
+    }
+
     private static async Task<RepositoryAnalysisResult> AnalyzeRepositoryAsync(string path, CancellationToken cancellationToken)
     {
         IRepositoryScanner scanner = new RepositoryScanner();
@@ -359,6 +495,51 @@ internal static class BrainCli
         Console.WriteLine($"Utilization: {preview.Call2.EstimatedTokens * 100d / preview.HardTokenLimit:F1}%");
         Console.WriteLine($"Status: {(preview.WithinBudget ? "within budget" : "exceeded")}");
         Console.WriteLine($"Manifest: {preview.ManifestPath}");
+    }
+
+    private static void WriteLivePreRun(
+        LiveEvaluationPlan plan,
+        RepositorySnapshot snapshot,
+        LiveEvaluationOptions options,
+        int maximumRetries,
+        string interpretationEffort,
+        string analysisEffort)
+    {
+        Console.WriteLine("Engineering Brain Live Evaluation");
+        WriteSection("Pre-run Summary");
+        Console.WriteLine($"Cases: {plan.Cases.Count}");
+        Console.WriteLine($"Runs per case: {plan.Runs}");
+        Console.WriteLine($"Expected logical calls: {plan.ExpectedLogicalCalls}");
+        Console.WriteLine($"Maximum provider attempts with retries: {plan.ExpectedLogicalCalls * (maximumRetries + 1)}");
+        Console.WriteLine($"CALL #1: {options.InterpretationModel} / {interpretationEffort}");
+        Console.WriteLine($"CALL #2: {options.ReasoningModel} / {analysisEffort}");
+        Console.WriteLine($"Estimated hard maximum input: {plan.EstimatedMaximumInputTokens}");
+        Console.WriteLine($"Remote authorization: {(options.Preview ? "preview only" : options.FakeProvider ? "fake provider; network disabled" : "enabled")}");
+        Console.WriteLine($"Repository: {snapshot.Repository.Name}");
+        Console.WriteLine($"Branch: {snapshot.Git.Branch ?? "(no branch)"}");
+    }
+
+    private static void WriteLiveEvaluation(LiveEvaluationRun result)
+    {
+        var aggregate = result.Aggregate;
+        WriteSection("Live Results");
+        Console.WriteLine($"Run: {result.RunId}");
+        Console.WriteLine($"Cases succeeded/failed: {aggregate.CasesSucceeded}/{aggregate.CasesFailed}");
+        Console.WriteLine($"Security blocked: {aggregate.SecurityBlocked}; structured failures: {aggregate.StructuredOutputFailures}");
+        Console.WriteLine($"CALL #1 capability hit rate: {aggregate.CapabilityHitRate:F3}");
+        Console.WriteLine($"Unknown detection accuracy: {aggregate.UnknownDetectionAccuracy:F3}");
+        Console.WriteLine($"Retrieval delta Recall@5/Recall@10/MRR: {aggregate.AverageRecallAt5Delta:F3}/{aggregate.AverageRecallAt10Delta:F3}/{aggregate.AverageMeanReciprocalRankDelta:F3}");
+        Console.WriteLine($"CALL #2 decision hit rate: {aggregate.ExpectedDecisionHitRate:F3}");
+        Console.WriteLine($"Evidence validation: {aggregate.EvidenceValidationRate:F3}; invalid: {aggregate.InvalidEvidence}; fabricated accepted: {aggregate.FabricatedEntitiesAccepted}");
+        Console.WriteLine($"NeedsClarification accuracy: {aggregate.NeedsClarificationAccuracy:F3}");
+        Console.WriteLine($"Context tokens average/median/max: {aggregate.AverageContextTokens:F1}/{aggregate.MedianContextTokens:F1}/{aggregate.MaximumContextTokens}");
+        Console.WriteLine($"Usage calls/attempts/input/cached/output: {aggregate.Usage.LogicalCalls}/{aggregate.Usage.ProviderAttempts}/{aggregate.Usage.ActualInputTokens}/{aggregate.Usage.CachedInputTokens}/{aggregate.Usage.ActualOutputTokens}");
+        Console.WriteLine($"Duration: {aggregate.Usage.DurationMilliseconds} ms; retries: {aggregate.Usage.Retries}; cost USD: {(aggregate.Usage.EstimatedCostUsd?.ToString("F6") ?? "n/a")}");
+        Console.WriteLine($"Consistency status/decision/entity/capability/evidence: {result.Consistency.StatusAgreement:F3}/{result.Consistency.DecisionAgreement:F3}/{result.Consistency.EntityReferenceOverlap:F3}/{result.Consistency.CapabilityOverlap:F3}/{result.Consistency.EvidenceValidityAgreement:F3}");
+        Console.WriteLine($"Outbound source/secrets/absolute/raw snapshot: {aggregate.SourceBodyOutbound}/{aggregate.SecretOutbound}/{aggregate.AbsolutePathOutbound}/{aggregate.RawSnapshotOutbound}");
+        WriteSection("Artifacts");
+        Console.WriteLine($"Summary: {result.SummaryPath}");
+        Console.WriteLine($"Review: {result.ReviewPath}");
     }
 
     private static void WriteEvaluation(EvaluationRunResult result, string baselinePath)
@@ -687,6 +868,10 @@ internal static class BrainCli
         Console.WriteLine("Usage: brain scan [path]");
         Console.WriteLine("       brain memory sync [path]");
         Console.WriteLine("       brain eval [repository-or-suite-path] [--update-baseline]");
+        Console.WriteLine("       brain eval-live [repository-or-live-suite] [--preview | --fake-provider | --allow-remote]");
+        Console.WriteLine("           [--case <id>] [--runs <1-3>] [--pricing <pricing.json>]");
+        Console.WriteLine("           [--interpretation-model <model>] [--reasoning-model <model>]");
+        Console.WriteLine("           [--interpretation-effort <low|medium|high>] [--analysis-effort <low|medium|high>]");
         Console.WriteLine("       brain analyze <initiative.md> [--repo <path>] [--preview | --allow-remote]");
         Console.WriteLine("           [--interpretation-model <model>] [--reasoning-model <model>]");
         Console.WriteLine("           [--interpretation-effort <low|medium|high>] [--analysis-effort <low|medium|high>]");
@@ -698,6 +883,19 @@ internal static class BrainCli
         string RepositoryPath,
         bool AllowRemote,
         bool Preview,
+        string InterpretationModel,
+        string ReasoningModel,
+        string InterpretationEffort,
+        string AnalysisEffort);
+
+    private sealed record LiveEvaluationOptions(
+        string InputPath,
+        bool AllowRemote,
+        bool FakeProvider,
+        bool Preview,
+        int Runs,
+        IReadOnlyList<string> CaseIds,
+        string? PricingPath,
         string InterpretationModel,
         string ReasoningModel,
         string InterpretationEffort,
