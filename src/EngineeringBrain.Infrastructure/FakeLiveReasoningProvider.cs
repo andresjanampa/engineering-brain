@@ -71,6 +71,7 @@ public sealed class FakeLiveReasoningProvider : IReasoningProvider
                 decision == RecommendationDecision.Create ? EpistemicStatus.Proposal : EpistemicStatus.Fact,
                 decision == RecommendationDecision.Create || entityIds.Length == 0 ? [] : [Evidence(entityIds[0])],
                 [],
+                [],
                 [])];
         return new InitiativeAnalysis(
             _item.Expected.ExpectedNeedsClarification ? InitiativeAnalysisStatus.NeedsClarification : _item.Expected.ExpectedStatus,

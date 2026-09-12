@@ -8,6 +8,7 @@ public sealed class InitiativeAnalysisService
     private readonly InitiativeCandidateRetriever _retriever;
     private readonly InitiativeContextBuilder _contextBuilder;
     private readonly AnalysisEvidenceValidator _validator;
+    private readonly PolicyComplianceValidator _policyValidator;
     private readonly LocalInitiativeAnalysisStore _store;
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
@@ -18,6 +19,7 @@ public sealed class InitiativeAnalysisService
         InitiativeCandidateRetriever? retriever = null,
         InitiativeContextBuilder? contextBuilder = null,
         AnalysisEvidenceValidator? validator = null,
+        PolicyComplianceValidator? policyValidator = null,
         LocalInitiativeAnalysisStore? store = null,
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
@@ -29,6 +31,7 @@ public sealed class InitiativeAnalysisService
         _budget = budget ?? new TokenBudgetOptions();
         _contextBuilder = contextBuilder ?? new InitiativeContextBuilder(estimator: _estimator, budget: _budget);
         _validator = validator ?? new AnalysisEvidenceValidator();
+        _policyValidator = policyValidator ?? new PolicyComplianceValidator();
         _store = store ?? new LocalInitiativeAnalysisStore();
         _outboundGuard = outboundGuard ?? new OutboundContextGuard();
     }
@@ -89,6 +92,7 @@ public sealed class InitiativeAnalysisService
                 reasoningInputTokens),
             cancellationToken);
         var validated = _validator.Validate(analysisCall.Value, request.Memory.SourceSnapshot);
+        var governance = _policyValidator.Evaluate(validated);
         var calls = new[] { understandingCall.Usage, analysisCall.Usage };
         var usage = new InitiativeAnalysisUsage(
             calls,
@@ -112,7 +116,8 @@ public sealed class InitiativeAnalysisService
             retrieval,
             context,
             analysisCall.Value,
-            validated,
+            governance.Recommendations,
+            governance.Outcome,
             usage,
             null);
         if (request.PersistResult)

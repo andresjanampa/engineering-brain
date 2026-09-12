@@ -383,7 +383,7 @@ public sealed class EvaluationHarness
                 : new[] { ToEvidence(snapshot, evidenceEntities[0]) };
             return new AnalysisRecommendation(decision, item.Description, "Golden deterministic evaluation response.",
                 decision == RecommendationDecision.Create ? EpistemicStatus.Proposal : EpistemicStatus.Fact,
-                evidence, [], []);
+                evidence, [], [], []);
         }).ToArray();
         return new InitiativeAnalysis(item.Expected.AnalysisStatus, "Deterministic golden analysis", [], [], recommendations,
             [], [], item.Expected.AnalysisStatus == InitiativeAnalysisStatus.NeedsClarification ? ["Clarify the triggering event and delivery channel."] : [],
