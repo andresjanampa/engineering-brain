@@ -112,6 +112,19 @@ internal static class ReviewedConceptTestData
             ["persistence"],
             ["analysis"]));
 
+    public static string CandidateProjection(ComponentCandidate candidate) => string.Join('|',
+        candidate.EntityId,
+        candidate.Score,
+        candidate.GraphExpanded,
+        string.Join(';', candidate.MatchReasons.Select(reason =>
+            $"{reason.Signal}:{reason.MatchedValue}:{reason.Points}")));
+
+    public static string ProjectProjection(ProjectCandidate candidate) => string.Join('|',
+        candidate.ProjectId,
+        candidate.Score,
+        string.Join(';', candidate.MatchReasons.Select(reason =>
+            $"{reason.Signal}:{reason.MatchedValue}:{reason.Points}")));
+
     public static ProjectMemorySyncResult Memory(
         RepositorySnapshot snapshot,
         ProjectMemoryManifest manifest) => new(

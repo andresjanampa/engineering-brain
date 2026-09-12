@@ -6,6 +6,139 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class InitiativeCandidateRetrieverTests
 {
     [Fact]
+    public void Retrieve_NoProfilesIsEquivalentToLexicalGraphV2()
+    {
+        var snapshot = ProjectMemoryTestFactory.Create();
+        var manifest = new ProjectMemoryBuilder().Build(snapshot).Manifest;
+        var understanding = InitiativeAnalysisTestData.Understanding("core business execute");
+        var retriever = new InitiativeCandidateRetriever();
+
+        var baseline = retriever.Retrieve(understanding, manifest, snapshot);
+        var explicitEmpty = retriever.Retrieve(understanding, manifest, snapshot, []);
+
+        Assert.Equal(
+            baseline.Components.Select(ReviewedConceptTestData.CandidateProjection),
+            explicitEmpty.Components.Select(ReviewedConceptTestData.CandidateProjection));
+        Assert.Equal(
+            baseline.Projects.Select(ReviewedConceptTestData.ProjectProjection),
+            explicitEmpty.Projects.Select(ReviewedConceptTestData.ProjectProjection));
+        Assert.Equal(baseline.Relations, explicitEmpty.Relations);
+    }
+
+    [Fact]
+    public void Retrieve_ConceptCannotIntroduceZeroLexicalCandidate()
+    {
+        var snapshot = AddComponent(
+            ProjectMemoryTestFactory.Create(),
+            "entity:concept-only",
+            "OpaqueWorker",
+            "Demo.Core.OpaqueWorker",
+            "project:core",
+            []);
+        var profile = ReviewedConceptTestData.Profile(
+            "entity:concept-only",
+            ReviewedConceptTestData.Concept("remote-authorization"));
+
+        var result = Retrieve("remote authorization", snapshot, [profile]);
+
+        Assert.DoesNotContain(result.Components, item => item.EntityId == "entity:concept-only");
+    }
+
+    [Fact]
+    public void Retrieve_ConceptCanPromotePositiveLexicalCandidateBeforeDirectCutoff()
+    {
+        var snapshot = AddComponents(ProjectMemoryTestFactory.Create(), 13);
+        var targetId = "entity:generated-9";
+        var profile = ReviewedConceptTestData.Profile(
+            targetId,
+            ReviewedConceptTestData.Concept("unique-semantic"));
+
+        var baseline = Retrieve("unique semantic", snapshot);
+        var reranked = Retrieve("unique semantic", snapshot, [profile]);
+
+        Assert.DoesNotContain(baseline.Components.Where(item => !item.GraphExpanded), item => item.EntityId == targetId);
+        Assert.Contains(reranked.Components.Where(item => !item.GraphExpanded), item => item.EntityId == targetId);
+        Assert.Contains(reranked.Components.Single(item => item.EntityId == targetId).MatchReasons,
+            reason => reason.Signal == "reviewed concept");
+    }
+
+    [Fact]
+    public void Retrieve_GraphExpandedCandidateReceivesNoConceptScore()
+    {
+        var snapshot = AddComponent(
+            ProjectMemoryTestFactory.Create(),
+            "entity:direct-worker",
+            "AlphaGateway",
+            "Demo.Core.AlphaGateway",
+            "project:core",
+            ["Execute"]);
+        snapshot = AddComponent(
+            snapshot,
+            "entity:opaque-neighbor",
+            "OpaqueNeighbor",
+            "Demo.Core.OpaqueNeighbor",
+            "project:core",
+            []);
+        snapshot = snapshot with
+        {
+            Relations = snapshot.Relations.Append(new CodeRelation(
+                "entity:direct-worker",
+                "entity:opaque-neighbor",
+                CodeRelationType.Implements,
+                "src/Core/AlphaGateway.cs",
+                1,
+                5,
+                ResolutionLevel.Semantic)).ToArray()
+        };
+        var profile = ReviewedConceptTestData.Profile(
+            "entity:opaque-neighbor",
+            ReviewedConceptTestData.Concept("execute-boundary"));
+
+        var result = Retrieve("execute boundary", snapshot, [profile]);
+
+        var expanded = Assert.Single(result.Components,
+            item => item.EntityId == "entity:opaque-neighbor" && item.GraphExpanded);
+        Assert.DoesNotContain(expanded.MatchReasons, reason => reason.Signal == "reviewed concept");
+    }
+
+    [Fact]
+    public void Retrieve_ConceptProfilesDoNotAffectProjectRanking()
+    {
+        var snapshot = ProjectMemoryTestFactory.Create();
+        var profile = ReviewedConceptTestData.Profile(
+            "entity:business-service",
+            ReviewedConceptTestData.Concept("business-execution"));
+
+        var baseline = Retrieve("business execution", snapshot);
+        var reranked = Retrieve("business execution", snapshot, [profile]);
+
+        Assert.Equal(
+            baseline.Projects.Select(ReviewedConceptTestData.ProjectProjection),
+            reranked.Projects.Select(ReviewedConceptTestData.ProjectProjection));
+    }
+
+    [Fact]
+    public void Retrieve_PersistenceRequiresResponsibilitySupport()
+    {
+        var snapshot = AddComponent(
+            ProjectMemoryTestFactory.Create(),
+            "entity:initiative-store",
+            "LocalInitiativeAnalysisStore",
+            "Demo.Core.LocalInitiativeAnalysisStore",
+            "project:core",
+            []);
+        var profile = ReviewedConceptTestData.PersistenceProfile("entity:initiative-store");
+
+        var rejected = Retrieve("initiative analysis", snapshot, [profile]);
+        var accepted = Retrieve("initiative persistence", snapshot, [profile]);
+
+        Assert.DoesNotContain(rejected.Components.Single(item => item.EntityId == "entity:initiative-store").MatchReasons,
+            reason => reason.Signal == "reviewed concept");
+        Assert.Contains(accepted.Components.Single(item => item.EntityId == "entity:initiative-store").MatchReasons,
+            reason => reason.Signal == "reviewed concept");
+    }
+
+    [Fact]
     public void Retrieve_ExactComponentNameRanksCandidateAndExplainsScore()
     {
         var result = Retrieve("BusinessService");
@@ -299,13 +432,18 @@ public sealed class InitiativeCandidateRetrieverTests
         Assert.False(TestCandidateClassifier.IsTestProject(incidental));
     }
 
-    private static CandidateRetrievalResult Retrieve(string term, RepositorySnapshot? snapshot = null)
+    private static CandidateRetrievalResult Retrieve(
+        string term,
+        RepositorySnapshot? snapshot = null,
+        IReadOnlyList<ComponentConceptProfile>? profiles = null)
     {
         snapshot ??= ProjectMemoryTestFactory.Create();
-        return new InitiativeCandidateRetriever().Retrieve(
-            InitiativeAnalysisTestData.Understanding(term),
-            new ProjectMemoryBuilder().Build(snapshot).Manifest,
-            snapshot);
+        var retriever = new InitiativeCandidateRetriever();
+        var understanding = InitiativeAnalysisTestData.Understanding(term);
+        var manifest = new ProjectMemoryBuilder().Build(snapshot).Manifest;
+        return profiles is null
+            ? retriever.Retrieve(understanding, manifest, snapshot)
+            : retriever.Retrieve(understanding, manifest, snapshot, profiles);
     }
 
     private static RepositorySnapshot AddComponents(RepositorySnapshot snapshot, int count)

@@ -89,15 +89,18 @@ public sealed class InitiativeCandidateRetriever
     private readonly InitiativeTermNormalizer _normalizer;
     private readonly CandidateRetrievalOptions _options;
     private readonly RetrievalScoringOptions _scoring;
+    private readonly ConceptCandidateReranker _conceptReranker;
 
     public InitiativeCandidateRetriever(
         InitiativeTermNormalizer? normalizer = null,
         CandidateRetrievalOptions? options = null,
-        RetrievalScoringOptions? scoring = null)
+        RetrievalScoringOptions? scoring = null,
+        ConceptCandidateReranker? conceptReranker = null)
     {
         _normalizer = normalizer ?? new InitiativeTermNormalizer();
         _options = options ?? new CandidateRetrievalOptions();
         _scoring = scoring ?? new RetrievalScoringOptions();
+        _conceptReranker = conceptReranker ?? new ConceptCandidateReranker(_normalizer);
         if (_options.GraphDepth is < 0 or > 1)
             throw new ArgumentOutOfRangeException(nameof(options), "Retrieval supports graph depth 0 or 1.");
         if (_scoring.MaximumMemberContribution < 0 || _scoring.MaximumRarityContribution < 0
@@ -108,11 +111,18 @@ public sealed class InitiativeCandidateRetriever
     public CandidateRetrievalResult Retrieve(
         InitiativeUnderstanding understanding,
         ProjectMemoryManifest manifest,
-        RepositorySnapshot snapshot)
+        RepositorySnapshot snapshot) => Retrieve(understanding, manifest, snapshot, []);
+
+    public CandidateRetrievalResult Retrieve(
+        InitiativeUnderstanding understanding,
+        ProjectMemoryManifest manifest,
+        RepositorySnapshot snapshot,
+        IReadOnlyList<ComponentConceptProfile> conceptProfiles)
     {
         ArgumentNullException.ThrowIfNull(understanding);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(conceptProfiles);
         EnsureCompatible(manifest, snapshot);
 
         var queryValues = GetQueryValues(understanding);
@@ -139,19 +149,32 @@ public sealed class InitiativeCandidateRetriever
             StringComparer.Ordinal);
         var rarity = TermRarityIndex.Create(metadata.Values.Select(value => value.AllTokens));
 
-        var direct = components
+        var positiveLexicalPool = components
             .Select(component => ScoreComponent(component, metadata[component.Id], terms, queryValues, rarity, projectsById, testIntent))
             .Where(candidate => candidate.MatchReasons.Any(reason => reason.Points > 0))
             .OrderByDescending(candidate => candidate.Score)
             .ThenBy(candidate => candidate.FullName, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.EntityId, StringComparer.Ordinal)
+            .ToArray();
+        var lexicalCandidates = positiveLexicalPool
+            .Take(_options.MaximumDirectComponents)
+            .ToArray();
+
+        var lexicalSelectionForProjects = lexicalCandidates.ToList();
+        if (_options.GraphDepth == 1 && _options.MaximumExpandedComponents > 0)
+        {
+            AddGraphExpansion(lexicalSelectionForProjects, snapshot, entitiesById, components);
+        }
+
+        var direct = _conceptReranker
+            .Rerank(positiveLexicalPool, terms, conceptProfiles)
             .Take(_options.MaximumDirectComponents)
             .ToList();
 
         if (_options.GraphDepth == 1 && _options.MaximumExpandedComponents > 0)
             AddGraphExpansion(direct, snapshot, entitiesById, components);
 
-        var componentProjectScores = direct
+        var componentProjectScores = lexicalSelectionForProjects
             .GroupBy(candidate => candidate.ProjectId, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Max(item => item.Score), StringComparer.Ordinal);
         var projects = snapshot.Projects
