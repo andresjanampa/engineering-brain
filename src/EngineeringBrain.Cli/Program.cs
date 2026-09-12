@@ -370,7 +370,8 @@ internal static class BrainCli
                 && result.Aggregate.SourceBodyOutbound == 0
                 && result.Aggregate.SecretOutbound == 0
                 && result.Aggregate.AbsolutePathOutbound == 0
-                && result.Aggregate.RawSnapshotOutbound == 0 ? 0 : 3;
+                && result.Aggregate.RawSnapshotOutbound == 0
+                && result.Aggregate.BlockedRecommendationEscapeCount == 0 ? 0 : 3;
         }
         catch (OperationCanceledException)
         {
@@ -531,7 +532,8 @@ internal static class BrainCli
         Console.WriteLine($"Retrieval delta Recall@5/Recall@10/MRR: {aggregate.AverageRecallAt5Delta:F3}/{aggregate.AverageRecallAt10Delta:F3}/{aggregate.AverageMeanReciprocalRankDelta:F3}");
         Console.WriteLine($"CALL #2 decision hit rate: {aggregate.ExpectedDecisionHitRate:F3}");
         Console.WriteLine($"Evidence validation: {aggregate.EvidenceValidationRate:F3}; invalid: {aggregate.InvalidEvidence}; fabricated accepted: {aggregate.FabricatedEntitiesAccepted}");
-        Console.WriteLine($"NeedsClarification accuracy: {aggregate.NeedsClarificationAccuracy:F3}");
+        Console.WriteLine($"Analysis status accuracy: {aggregate.AnalysisStatusAccuracy:F3}");
+        Console.WriteLine($"Policy activation/outcome accuracy: {aggregate.PolicyActivationAccuracy:F3}/{aggregate.PolicyOutcomeAccuracy:F3}; blocked recommendation escapes: {aggregate.BlockedRecommendationEscapeCount}");
         Console.WriteLine($"Context tokens average/median/max: {aggregate.AverageContextTokens:F1}/{aggregate.MedianContextTokens:F1}/{aggregate.MaximumContextTokens}");
         Console.WriteLine($"Usage calls/attempts/input/cached/output: {aggregate.Usage.LogicalCalls}/{aggregate.Usage.ProviderAttempts}/{aggregate.Usage.ActualInputTokens}/{aggregate.Usage.CachedInputTokens}/{aggregate.Usage.ActualOutputTokens}");
         Console.WriteLine($"Duration: {aggregate.Usage.DurationMilliseconds} ms; retries: {aggregate.Usage.Retries}; cost USD: {(aggregate.Usage.EstimatedCostUsd?.ToString("F6") ?? "n/a")}");

@@ -20,18 +20,35 @@ public sealed record LiveEvaluationCase(
     string Description,
     string InitiativePath,
     InitiativeUnderstanding GoldenUnderstanding,
-    LiveEvaluationExpectations Expected);
+    LiveUnderstandingExpectations UnderstandingExpectations,
+    LiveRepositoryExpectations RepositoryExpectations,
+    LiveAnalysisExpectations AnalysisExpectations,
+    LivePolicyExpectations PolicyExpectations);
 
-public sealed record LiveEvaluationExpectations(
+public sealed record LiveUnderstandingExpectations(
     IReadOnlyList<string> RequiredCapabilities,
     IReadOnlyList<string> AcceptableCapabilities,
-    InitiativeAnalysisStatus ExpectedStatus,
-    IReadOnlyList<RecommendationDecision> AcceptableDecisionTypes,
+    IReadOnlyList<string> ExpectedUnknownTopics);
+
+public sealed record LiveRepositoryExpectations(
     IReadOnlyList<string> RequiredEntities,
     IReadOnlyList<string> AcceptableEntities,
     IReadOnlyList<string> RequiredProjects,
-    IReadOnlyList<string> AcceptableProjects,
-    bool ExpectedNeedsClarification);
+    IReadOnlyList<string> AcceptableProjects);
+
+public sealed record LiveAnalysisExpectations(
+    IReadOnlyList<InitiativeAnalysisStatus> AcceptableStatuses,
+    IReadOnlyList<RecommendationDecision> AcceptableDecisionTypes,
+    IReadOnlyList<string> ExpectedClarificationTopics);
+
+public sealed record LivePolicyActivationExpectation(
+    string PolicyId,
+    bool ExpectedActive);
+
+public sealed record LivePolicyExpectations(
+    IReadOnlyList<LivePolicyActivationExpectation> Activations,
+    IReadOnlyList<PolicyOutcome> AcceptableOutcomes,
+    int ExpectedBlockedRecommendationEscapeCount);
 
 public sealed record LiveEvaluationPlan(
     LiveEvaluationSuite Suite,
@@ -54,9 +71,10 @@ public sealed record LiveUnderstandingMetrics(
     double RequiredCapabilityHitRate,
     IReadOnlyList<string> MissingRequiredCapabilities,
     IReadOnlyList<string> AcceptableCapabilitiesHit,
-    bool ExpectedUnknowns,
-    bool UnknownsDetected,
-    double UnknownCoverage,
+    int ExpectedUnknownTopics,
+    int ExpectedUnknownTopicsHit,
+    double UnknownTopicCoverage,
+    IReadOnlyList<string> MissingExpectedUnknownTopics,
     double SearchTermCoverage,
     IReadOnlyList<string> MissingSearchTerms,
     IReadOnlyList<string> ExtraSearchTerms,
@@ -88,15 +106,32 @@ public sealed record LiveCall2Metrics(
     int ProposalCount,
     int FabricatedEntitiesAccepted,
     double EvidenceValidationRate,
-    bool NeedsClarificationExpected,
-    bool NeedsClarificationActual,
-    bool NeedsClarificationCorrect,
+    IReadOnlyList<InitiativeAnalysisStatus> AcceptableStatuses,
+    InitiativeAnalysisStatus ActualStatus,
+    bool AnalysisStatusCorrect,
     int ClarifyingQuestionCount,
     bool ClarifyingQuestionsRelevant,
     IReadOnlyList<string> RelevantEntityHits,
     IReadOnlyList<string> MissingRelevantEntities,
     IReadOnlyList<string> RelevantProjectHits,
     IReadOnlyList<string> MissingRelevantProjects);
+
+public sealed record LivePolicyActivationResult(
+    string PolicyId,
+    bool ExpectedActive,
+    bool ActualActive,
+    bool Correct,
+    IReadOnlyList<PolicyComplianceStatus> ActualStatuses);
+
+public sealed record LivePolicyMetrics(
+    IReadOnlyList<LivePolicyActivationResult> Activations,
+    double PolicyActivationAccuracy,
+    IReadOnlyList<PolicyOutcome> AcceptableOutcomes,
+    PolicyOutcome ActualOutcome,
+    bool PolicyOutcomeCorrect,
+    int ExpectedBlockedRecommendationEscapeCount,
+    int BlockedRecommendationEscapeCount,
+    bool BlockedRecommendationEscapeCountCorrect);
 
 public sealed record LiveContextMetrics(
     int EstimatedTokens,
@@ -127,8 +162,10 @@ public sealed record LiveEvaluationCaseResult(
     LiveRetrievalComparison? RetrievalComparison,
     LiveContextMetrics? Context,
     InitiativeAnalysis? Analysis,
-    IReadOnlyList<ValidatedRecommendation> Recommendations,
+    IReadOnlyList<GovernedRecommendation> Recommendations,
+    PolicyOutcome? PolicyOutcome,
     LiveCall2Metrics? Call2Metrics,
+    LivePolicyMetrics? PolicyMetrics,
     IReadOnlyList<ReasoningCallUsage> Usage,
     IReadOnlyList<OutboundValidationResult> SecurityChecks,
     string? ErrorCategory,
@@ -170,7 +207,10 @@ public sealed record LiveEvaluationAggregate(
     double EvidenceValidationRate,
     int InvalidEvidence,
     int FabricatedEntitiesAccepted,
-    double NeedsClarificationAccuracy,
+    double AnalysisStatusAccuracy,
+    double PolicyActivationAccuracy,
+    double PolicyOutcomeAccuracy,
+    int BlockedRecommendationEscapeCount,
     double AverageContextTokens,
     double MedianContextTokens,
     int MaximumContextTokens,

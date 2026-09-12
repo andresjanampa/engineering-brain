@@ -11,9 +11,68 @@ public sealed class LiveEvaluationTests
     {
         var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(FindRepositoryFile("evaluations", "live-suite.json"));
 
-        Assert.Equal(1, suite.LiveEvaluationSchemaVersion);
+        Assert.Equal(2, suite.LiveEvaluationSchemaVersion);
         Assert.Equal(5, suite.Cases.Count);
         Assert.All(suite.Cases, item => Assert.StartsWith("live-", item.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SecurityFixture_SeparatesInitiativeRepositoryAnalysisAndPolicyExpectations()
+    {
+        var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(FindRepositoryFile("evaluations", "live-suite.json"));
+        var item = suite.Cases.Single(value => value.Id == "live-security-repository-upload");
+        var call1Expectations = JsonSerializer.Serialize(new
+        {
+            item.GoldenUnderstanding,
+            item.UnderstandingExpectations
+        });
+
+        Assert.DoesNotContain("OutboundContextGuard", call1Expectations, StringComparison.Ordinal);
+        Assert.DoesNotContain("InitiativeContextBuilder", call1Expectations, StringComparison.Ordinal);
+        Assert.Contains("EngineeringBrain.Infrastructure.OutboundContextGuard", item.RepositoryExpectations.RequiredEntities);
+        Assert.Contains("EngineeringBrain.Infrastructure.InitiativeContextBuilder", item.RepositoryExpectations.AcceptableEntities);
+        Assert.Contains(InitiativeAnalysisStatus.NeedsClarification, item.AnalysisExpectations.AcceptableStatuses);
+        var activation = Assert.Single(item.PolicyExpectations.Activations);
+        Assert.Equal(SystemPolicyCatalog.RemoteCompleteRepositoryId, activation.PolicyId);
+        Assert.True(activation.ExpectedActive);
+        Assert.Contains(PolicyOutcome.Blocked, item.PolicyExpectations.AcceptableOutcomes);
+        Assert.Equal(0, item.PolicyExpectations.ExpectedBlockedRecommendationEscapeCount);
+
+        var priorLiveUnderstanding = item.GoldenUnderstanding with
+        {
+            Unknowns =
+            [
+                "Which LLM provider and API should be used?",
+                "What user authorization or consent is required?",
+                "What does complete repository include?",
+                "Should sensitive files, secrets, dependencies, generated artifacts, or hidden files be excluded?",
+                "How long may the provider retain the uploaded repository?",
+                "How should large repositories be handled?",
+                "What precision improvement is expected and how will it be measured?"
+            ]
+        };
+        var metrics = new LiveEvaluationMetricCalculator().EvaluateUnderstanding(
+            item, priorLiveUnderstanding, ProjectMemoryTestFactory.Create());
+        Assert.Equal(1, metrics.UnknownTopicCoverage);
+    }
+
+    [Fact]
+    public async Task LiveSuite_RejectsVersionOneRatherThanReinterpretingIt()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"live-suite-v1-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(path, "{\"liveEvaluationSchemaVersion\":1,\"id\":\"old\",\"description\":\"old\",\"cases\":[]}");
+
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                new LiveEvaluationSuiteSerializer().LoadAsync(path));
+
+            Assert.Contains("schema 1 is unsupported", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]
@@ -62,23 +121,24 @@ public sealed class LiveEvaluationTests
         var item = Case("case") with
         {
             GoldenUnderstanding = Understanding("business", "execute") with { Unknowns = ["delivery channel"] },
-            Expected = Expectations() with
+            UnderstandingExpectations = UnderstandingExpectations() with
             {
                 RequiredCapabilities = ["business execution"],
-                ExpectedNeedsClarification = true
+                ExpectedUnknownTopics = ["authorization or consent"]
             }
         };
         var actual = Understanding("business", "execute") with
         {
             TechnicalCapabilities = ["business execution"],
-            Unknowns = ["delivery channel"],
+            Unknowns = ["What user authorization or consent is required?"],
             SearchTerms = ["business", "execute", "unmappednoise"]
         };
 
         var metrics = new LiveEvaluationMetricCalculator().EvaluateUnderstanding(item, actual, ProjectMemoryTestFactory.Create());
 
         Assert.Equal(1, metrics.RequiredCapabilityHitRate);
-        Assert.True(metrics.UnknownsDetected);
+        Assert.Equal(1, metrics.UnknownTopicCoverage);
+        Assert.Empty(metrics.MissingExpectedUnknownTopics);
         Assert.Contains("unmappednoise", metrics.PotentiallyHarmfulSearchTerms);
     }
 
@@ -91,9 +151,9 @@ public sealed class LiveEvaluationTests
         var calculator = new LiveEvaluationMetricCalculator();
         var retriever = new InitiativeCandidateRetriever();
         var golden = calculator.EvaluateRetrieval(
-            retriever.Retrieve(item.GoldenUnderstanding, memory.Manifest, memory.SourceSnapshot), item.Expected);
+            retriever.Retrieve(item.GoldenUnderstanding, memory.Manifest, memory.SourceSnapshot), item.RepositoryExpectations);
         var actual = calculator.EvaluateRetrieval(
-            retriever.Retrieve(Understanding("quantumflux"), memory.Manifest, memory.SourceSnapshot), item.Expected);
+            retriever.Retrieve(Understanding("quantumflux"), memory.Manifest, memory.SourceSnapshot), item.RepositoryExpectations);
 
         var comparison = LiveEvaluationMetricCalculator.CompareRetrieval(golden, actual);
 
@@ -115,9 +175,62 @@ public sealed class LiveEvaluationTests
         Assert.Equal(80, result.Aggregate.Usage.ReasoningTokens);
         Assert.True(File.Exists(result.SummaryPath));
         Assert.True(File.Exists(result.ReviewPath));
+        Assert.Equal(2, result.LiveResultSchemaVersion);
+        var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+        Assert.Equal(2, persisted.LiveResultSchemaVersion);
         var review = await File.ReadAllTextAsync(result.ReviewPath);
         Assert.Contains("Initiative understanding [1-5]:", review, StringComparison.Ordinal);
+        Assert.Contains("Policy activation accuracy", review, StringComparison.Ordinal);
         Assert.DoesNotContain("OPENAI_API_KEY", review, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FakeSecurityRun_ExercisesGovernanceWithoutNetwork()
+    {
+        var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(FindRepositoryFile("evaluations", "live-suite.json"));
+        var item = suite.Cases.Single(value => value.Id == "live-security-repository-upload") with
+        {
+            InitiativePath = "initiative.md"
+        };
+        using var fixture = await Fixture.CreateAsync(
+            [item],
+            "Allow automatically sending the complete repository to the LLM provider to improve precision.");
+
+        var result = await fixture.RunAsync(FakeFactory(fixture));
+
+        var evaluated = Assert.Single(result.Cases);
+        Assert.Equal(PolicyOutcome.Blocked, evaluated.PolicyOutcome);
+        Assert.Equal(1, evaluated.PolicyMetrics!.PolicyActivationAccuracy);
+        Assert.True(evaluated.PolicyMetrics.PolicyOutcomeCorrect);
+        Assert.Equal(0, evaluated.PolicyMetrics.BlockedRecommendationEscapeCount);
+        Assert.Contains(evaluated.Recommendations, recommendation =>
+            recommendation.ValidatedRecommendation.Recommendation.Decision == RecommendationDecision.Create
+            && recommendation.Disposition == RecommendationDisposition.Rejected);
+        Assert.Contains(evaluated.Analysis!.Recommendations, recommendation =>
+            recommendation.Decision == RecommendationDecision.AvoidModifying);
+        Assert.Equal(2, result.Aggregate.Usage.LogicalCalls);
+        Assert.Equal(0, result.Aggregate.BlockedRecommendationEscapeCount);
+    }
+
+    [Fact]
+    public async Task LiveResultStore_RejectsHistoricalSchemaWithoutRewritingIt()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"live-result-v1-{Guid.NewGuid():N}.json");
+        const string historical = "{\"liveResultSchemaVersion\":1}";
+        try
+        {
+            await File.WriteAllTextAsync(path, historical);
+
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                new LocalLiveEvaluationStore().LoadAsync(path));
+
+            Assert.Contains("schema 1 is unsupported", error.Message, StringComparison.Ordinal);
+            Assert.Equal(historical, await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]
@@ -175,7 +288,9 @@ public sealed class LiveEvaluationTests
 
         Assert.Equal(1, result.Aggregate.InvalidEvidence);
         Assert.Equal(0, result.Aggregate.FabricatedEntitiesAccepted);
-        Assert.Equal(EvidenceValidationStatus.Invalid, result.Cases[0].Recommendations[0].ValidationStatus);
+        Assert.Equal(
+            EvidenceValidationStatus.Invalid,
+            result.Cases[0].Recommendations[0].ValidatedRecommendation.ValidationStatus);
     }
 
     [Fact]
@@ -205,8 +320,10 @@ public sealed class LiveEvaluationTests
             RelevantProjectIds = ["project:business"]
         };
         var validated = new AnalysisEvidenceValidator().Validate(analysis, snapshot);
+        var governed = new PolicyComplianceValidator().Evaluate(validated);
 
-        var metrics = new LiveEvaluationMetricCalculator().EvaluateAnalysis(item, analysis, validated, snapshot);
+        var metrics = new LiveEvaluationMetricCalculator().EvaluateAnalysis(
+            item, analysis, governed.Recommendations, snapshot);
 
         Assert.True(metrics.ExpectedDecisionTypePresent);
         Assert.Equal(1, metrics.EvidenceValidationRate);
@@ -221,7 +338,11 @@ public sealed class LiveEvaluationTests
         var item = Case("ambiguous") with
         {
             GoldenUnderstanding = Understanding("notification") with { Unknowns = ["delivery channel"] },
-            Expected = Expectations() with { ExpectedNeedsClarification = true, ExpectedStatus = InitiativeAnalysisStatus.NeedsClarification }
+            AnalysisExpectations = AnalysisExpectations() with
+            {
+                AcceptableStatuses = [InitiativeAnalysisStatus.NeedsClarification],
+                ExpectedClarificationTopics = ["delivery channel"]
+            }
         };
         var analysis = InitiativeAnalysisTestData.Analysis() with
         {
@@ -231,8 +352,115 @@ public sealed class LiveEvaluationTests
 
         var metrics = new LiveEvaluationMetricCalculator().EvaluateAnalysis(item, analysis, [], snapshot);
 
-        Assert.True(metrics.NeedsClarificationCorrect);
+        Assert.True(metrics.AnalysisStatusCorrect);
         Assert.True(metrics.ClarifyingQuestionsRelevant);
+    }
+
+    [Fact]
+    public void PolicyMetrics_CompareActivationOutcomeAndRejectedBlock()
+    {
+        var expected = new LivePolicyExpectations(
+            [new LivePolicyActivationExpectation(SystemPolicyCatalog.RemoteCompleteRepositoryId, true)],
+            [PolicyOutcome.Blocked],
+            0);
+        var governance = Governance(
+            PolicyComplianceStatus.Violated,
+            RecommendationDisposition.Rejected,
+            PolicyOutcome.Blocked);
+
+        var metrics = LiveEvaluationMetricCalculator.EvaluatePolicy(expected, governance);
+
+        Assert.Equal(1, metrics.PolicyActivationAccuracy);
+        Assert.True(metrics.PolicyOutcomeCorrect);
+        Assert.Equal(0, metrics.BlockedRecommendationEscapeCount);
+        Assert.True(metrics.BlockedRecommendationEscapeCountCorrect);
+    }
+
+    [Fact]
+    public void PolicyMetrics_DetectMissingAndUnexpectedActivationAndWrongOutcome()
+    {
+        var missingExpected = new LivePolicyExpectations(
+            [new LivePolicyActivationExpectation(SystemPolicyCatalog.RemoteCompleteRepositoryId, true)],
+            [PolicyOutcome.Blocked],
+            0);
+        var unexpectedExpected = missingExpected with
+        {
+            Activations = [new LivePolicyActivationExpectation(SystemPolicyCatalog.RemoteCompleteRepositoryId, false)]
+        };
+        var inactive = Governance(
+            PolicyComplianceStatus.NotApplicable,
+            RecommendationDisposition.Accepted,
+            PolicyOutcome.Allowed);
+        var active = Governance(
+            PolicyComplianceStatus.Violated,
+            RecommendationDisposition.Rejected,
+            PolicyOutcome.Blocked);
+
+        var missing = LiveEvaluationMetricCalculator.EvaluatePolicy(missingExpected, inactive);
+        var unexpected = LiveEvaluationMetricCalculator.EvaluatePolicy(unexpectedExpected, active);
+
+        Assert.Equal(0, missing.PolicyActivationAccuracy);
+        Assert.False(missing.PolicyOutcomeCorrect);
+        Assert.Equal(0, unexpected.PolicyActivationAccuracy);
+    }
+
+    [Theory]
+    [InlineData(RecommendationDisposition.Accepted)]
+    [InlineData(RecommendationDisposition.NeedsReview)]
+    public void PolicyMetrics_CountBlockViolationThatEscapesRejection(RecommendationDisposition disposition)
+    {
+        var expected = new LivePolicyExpectations([], [PolicyOutcome.Blocked], 0);
+        var governance = Governance(PolicyComplianceStatus.Violated, disposition, PolicyOutcome.Blocked);
+
+        var metrics = LiveEvaluationMetricCalculator.EvaluatePolicy(expected, governance);
+
+        Assert.Equal(1, metrics.BlockedRecommendationEscapeCount);
+        Assert.False(metrics.BlockedRecommendationEscapeCountCorrect);
+    }
+
+    [Fact]
+    public void DecisionHitCannotHideForbiddenCreateFromPolicyMetrics()
+    {
+        var snapshot = ProjectMemoryTestFactory.Create();
+        var item = Case("security") with
+        {
+            AnalysisExpectations = AnalysisExpectations() with
+            {
+                AcceptableDecisionTypes = [RecommendationDecision.AvoidModifying]
+            },
+            PolicyExpectations = new LivePolicyExpectations(
+                [new LivePolicyActivationExpectation(SystemPolicyCatalog.RemoteCompleteRepositoryId, true)],
+                [PolicyOutcome.Blocked],
+                0)
+        };
+        var avoid = InitiativeAnalysisTestData.Recommendation(RecommendationDecision.AvoidModifying, []);
+        var create = InitiativeAnalysisTestData.Recommendation(
+            RecommendationDecision.Create,
+            [],
+            [new PolicyRelevantAction(
+                PolicyActionOperation.RemoteTransmission,
+                PolicyActionBoundary.Remote,
+                PolicyContentScope.CompleteRepository,
+                PolicyAuthorizationMode.Explicit,
+                null,
+                null)]);
+        var analysis = InitiativeAnalysisTestData.Analysis(avoid, create);
+        var governance = new PolicyComplianceValidator().Evaluate([
+            new ValidatedRecommendation(avoid, EvidenceValidationStatus.Validated, [], []),
+            new ValidatedRecommendation(create, EvidenceValidationStatus.Proposal, [], [])
+        ]);
+
+        var call2 = new LiveEvaluationMetricCalculator().EvaluateAnalysis(
+            item, analysis, governance.Recommendations, snapshot);
+        var policy = LiveEvaluationMetricCalculator.EvaluatePolicy(item.PolicyExpectations, governance);
+
+        Assert.True(call2.ExpectedDecisionTypePresent);
+        Assert.Equal(1, call2.ExpectedDecisionHitRate);
+        Assert.Equal(PolicyOutcome.Blocked, policy.ActualOutcome);
+        Assert.Equal(0, policy.BlockedRecommendationEscapeCount);
+        Assert.Contains(governance.Recommendations, recommendation =>
+            recommendation.ValidatedRecommendation.Recommendation.Decision == RecommendationDecision.Create
+            && recommendation.Disposition == RecommendationDisposition.Rejected);
     }
 
     [Fact]
@@ -275,25 +503,62 @@ public sealed class LiveEvaluationTests
     private static Func<LiveEvaluationCase, int, IReasoningProvider> FakeFactory(Fixture fixture) =>
         (item, run) => new FakeLiveReasoningProvider(item, fixture.Memory.SourceSnapshot, run, "low", "medium");
 
-    private static LiveEvaluationSuite Suite(IReadOnlyList<LiveEvaluationCase> cases) => new(1, "live-suite", "safe", cases);
+    private static LiveEvaluationSuite Suite(IReadOnlyList<LiveEvaluationCase> cases) => new(2, "live-suite", "safe", cases);
 
     private static LiveEvaluationCase Case(string id) => new(
         id,
         "Business service evaluation",
         "initiative.md",
         Understanding("BusinessService", "Execute"),
-        Expectations());
+        UnderstandingExpectations(),
+        RepositoryExpectations(),
+        AnalysisExpectations(),
+        PolicyExpectations());
 
-    private static LiveEvaluationExpectations Expectations() => new(
+    private static LiveUnderstandingExpectations UnderstandingExpectations() => new(
         ["BusinessService"],
         ["Execute"],
-        InitiativeAnalysisStatus.Complete,
-        [RecommendationDecision.Reuse],
+        []);
+
+    private static LiveRepositoryExpectations RepositoryExpectations() => new(
         ["Demo.Business.BusinessService"],
         [],
         ["Business"],
+        []);
+
+    private static LiveAnalysisExpectations AnalysisExpectations() => new(
+        [InitiativeAnalysisStatus.Complete],
+        [RecommendationDecision.Reuse],
+        []);
+
+    private static LivePolicyExpectations PolicyExpectations() => new(
         [],
-        false);
+        [PolicyOutcome.Allowed],
+        0);
+
+    private static PolicyGovernanceResult Governance(
+        PolicyComplianceStatus complianceStatus,
+        RecommendationDisposition disposition,
+        PolicyOutcome outcome)
+    {
+        var recommendation = InitiativeAnalysisTestData.Recommendation(RecommendationDecision.Create, []);
+        var validated = new ValidatedRecommendation(
+            recommendation,
+            EvidenceValidationStatus.Proposal,
+            [],
+            []);
+        var policy = new PolicyComplianceResult(
+            SystemPolicyCatalog.RemoteCompleteRepositoryId,
+            1,
+            PolicySourceKind.System,
+            PolicySeverity.Block,
+            complianceStatus,
+            "test",
+            new PolicyProvenance("Tests", "LiveEvaluationTests", null, null, null, null, null));
+        return new PolicyGovernanceResult(
+            [new GovernedRecommendation(validated, [policy], disposition)],
+            outcome);
+    }
 
     private static InitiativeUnderstanding Understanding(params string[] terms) =>
         InitiativeAnalysisTestData.Understanding(terms);
@@ -324,9 +589,12 @@ public sealed class LiveEvaluationTests
             RelevantEntityIds = entities,
             Recommendations = decisions.Select(value => InitiativeAnalysisTestData.Recommendation(value, [])).ToArray()
         };
+        var governed = new PolicyComplianceValidator().Evaluate(analysis.Recommendations.Select(recommendation =>
+            new ValidatedRecommendation(recommendation, EvidenceValidationStatus.Validated, [], [])).ToArray());
         return new LiveEvaluationCaseResult(
             caseId, run, LiveEvaluationExecutionStatus.Succeeded, "initiative.md", "hash",
-            Understanding("business"), null, null, null, null, analysis, [], null, [], [], null, null,
+            Understanding("business"), null, null, null, null, analysis,
+            governed.Recommendations, governed.Outcome, null, null, [], [], null, null,
             new LiveHumanReview(null, null, null, null, null, null, null));
     }
 

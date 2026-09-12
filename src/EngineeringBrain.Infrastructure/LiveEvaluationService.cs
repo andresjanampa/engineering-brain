@@ -9,6 +9,7 @@ public sealed class LiveEvaluationService
     private readonly InitiativeCandidateRetriever _retriever;
     private readonly InitiativeContextBuilder _contextBuilder;
     private readonly AnalysisEvidenceValidator _validator;
+    private readonly PolicyComplianceValidator _policyValidator;
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
     private readonly OutboundContextGuard _guard;
@@ -20,6 +21,7 @@ public sealed class LiveEvaluationService
         InitiativeCandidateRetriever? retriever = null,
         InitiativeContextBuilder? contextBuilder = null,
         AnalysisEvidenceValidator? validator = null,
+        PolicyComplianceValidator? policyValidator = null,
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
         OutboundContextGuard? guard = null,
@@ -32,6 +34,7 @@ public sealed class LiveEvaluationService
         _budget = budget ?? new TokenBudgetOptions();
         _contextBuilder = contextBuilder ?? new InitiativeContextBuilder(estimator: _estimator, budget: _budget);
         _validator = validator ?? new AnalysisEvidenceValidator();
+        _policyValidator = policyValidator ?? new PolicyComplianceValidator();
         _guard = guard ?? new OutboundContextGuard();
         _metrics = metrics ?? new LiveEvaluationMetricCalculator();
         _store = store ?? new LocalLiveEvaluationStore();
@@ -80,7 +83,7 @@ public sealed class LiveEvaluationService
             Func<ReasoningCallUsage, decimal?>? estimateCost = pricing is null ? null : pricing.Estimate;
             var aggregate = LiveEvaluationMetricCalculator.Aggregate(current, estimateCost);
             return new LiveEvaluationRun(
-                1,
+                LocalLiveEvaluationStore.CurrentResultSchemaVersion,
                 runId,
                 started,
                 plan.Suite.Id,
@@ -147,8 +150,10 @@ public sealed class LiveEvaluationService
         LiveRetrievalComparison? retrievalComparison = null;
         LiveContextMetrics? contextMetrics = null;
         InitiativeAnalysis? analysis = null;
-        IReadOnlyList<ValidatedRecommendation> recommendations = [];
+        IReadOnlyList<GovernedRecommendation> recommendations = [];
+        PolicyOutcome? policyOutcome = null;
         LiveCall2Metrics? call2Metrics = null;
+        LivePolicyMetrics? policyMetrics = null;
         var usage = new List<ReasoningCallUsage>();
         var security = new List<OutboundValidationResult>();
         var failedEstimate = 0;
@@ -181,8 +186,8 @@ public sealed class LiveEvaluationService
             var goldenRetrieval = _retriever.Retrieve(item.GoldenUnderstanding, memory.Manifest, memory.SourceSnapshot);
             retrieval = _retriever.Retrieve(understanding, memory.Manifest, memory.SourceSnapshot);
             retrievalComparison = LiveEvaluationMetricCalculator.CompareRetrieval(
-                _metrics.EvaluateRetrieval(goldenRetrieval, item.Expected),
-                _metrics.EvaluateRetrieval(retrieval, item.Expected));
+                _metrics.EvaluateRetrieval(goldenRetrieval, item.RepositoryExpectations),
+                _metrics.EvaluateRetrieval(retrieval, item.RepositoryExpectations));
             var context = await _contextBuilder.BuildAsync(understanding, retrieval, memory, cancellationToken);
             contextMetrics = new LiveContextMetrics(
                 context.EstimatedTokens,
@@ -210,8 +215,12 @@ public sealed class LiveEvaluationService
                 call2Estimate), cancellationToken);
             usage.Add(call2.Usage);
             analysis = call2.Value;
-            recommendations = _validator.Validate(analysis, memory.SourceSnapshot);
+            var validated = _validator.Validate(analysis, memory.SourceSnapshot);
+            var governance = _policyValidator.Evaluate(validated);
+            recommendations = governance.Recommendations;
+            policyOutcome = governance.Outcome;
             call2Metrics = _metrics.EvaluateAnalysis(item, analysis, recommendations, memory.SourceSnapshot);
+            policyMetrics = LiveEvaluationMetricCalculator.EvaluatePolicy(item.PolicyExpectations, governance);
             return Result(LiveEvaluationExecutionStatus.Succeeded, null, null);
         }
         catch (OperationCanceledException)
@@ -260,7 +269,9 @@ public sealed class LiveEvaluationService
             contextMetrics,
             analysis,
             recommendations,
+            policyOutcome,
             call2Metrics,
+            policyMetrics,
             usage.ToArray(),
             security.ToArray(),
             category,

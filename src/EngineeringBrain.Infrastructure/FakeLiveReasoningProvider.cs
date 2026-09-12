@@ -57,14 +57,15 @@ public sealed class FakeLiveReasoningProvider : IReasoningProvider
 
     private InitiativeAnalysis CreateAnalysis()
     {
-        var entityIds = _item.Expected.RequiredEntities.Concat(_item.Expected.AcceptableEntities)
+        var entityIds = _item.RepositoryExpectations.RequiredEntities.Concat(_item.RepositoryExpectations.AcceptableEntities)
             .Select(FindEntityId).Where(value => value is not null).Cast<string>().Distinct(StringComparer.Ordinal).ToArray();
-        var projectIds = _item.Expected.RequiredProjects.Concat(_item.Expected.AcceptableProjects)
+        var projectIds = _item.RepositoryExpectations.RequiredProjects.Concat(_item.RepositoryExpectations.AcceptableProjects)
             .Select(FindProjectId).Where(value => value is not null).Cast<string>().Distinct(StringComparer.Ordinal).ToArray();
-        var decision = _item.Expected.AcceptableDecisionTypes.FirstOrDefault(RecommendationDecision.Create);
-        IReadOnlyList<AnalysisRecommendation> recommendations = _item.Expected.ExpectedNeedsClarification
-            ? []
-            : [new AnalysisRecommendation(
+        var recommendations = new List<AnalysisRecommendation>();
+        if (_item.AnalysisExpectations.AcceptableDecisionTypes.Count > 0)
+        {
+            var decision = _item.AnalysisExpectations.AcceptableDecisionTypes[0];
+            recommendations.Add(new AnalysisRecommendation(
                 decision,
                 _item.Description,
                 "Deterministic fake live evaluation response.",
@@ -72,16 +73,43 @@ public sealed class FakeLiveReasoningProvider : IReasoningProvider
                 decision == RecommendationDecision.Create || entityIds.Length == 0 ? [] : [Evidence(entityIds[0])],
                 [],
                 [],
-                [])];
+                []));
+        }
+
+        if (_item.PolicyExpectations.Activations.Any(expectation => expectation.ExpectedActive
+            && expectation.PolicyId == SystemPolicyCatalog.RemoteCompleteRepositoryId))
+        {
+            recommendations.Add(new AnalysisRecommendation(
+                RecommendationDecision.Create,
+                "Remote complete-repository transmission capability",
+                "Deterministic fake action for exercising local policy governance.",
+                EpistemicStatus.Proposal,
+                [],
+                [],
+                [],
+                [new PolicyRelevantAction(
+                    PolicyActionOperation.RemoteTransmission,
+                    PolicyActionBoundary.Remote,
+                    PolicyContentScope.CompleteRepository,
+                    PolicyAuthorizationMode.Automatic,
+                    null,
+                    null)]));
+        }
+
+        var status = _item.AnalysisExpectations.AcceptableStatuses
+            .FirstOrDefault(InitiativeAnalysisStatus.Complete);
+        var questions = _item.AnalysisExpectations.ExpectedClarificationTopics
+            .Select(topic => $"What requirements apply to {topic}?")
+            .ToArray();
         return new InitiativeAnalysis(
-            _item.Expected.ExpectedNeedsClarification ? InitiativeAnalysisStatus.NeedsClarification : _item.Expected.ExpectedStatus,
+            status,
             "Deterministic fake live evaluation analysis.",
             projectIds,
             entityIds,
             recommendations,
             [],
-            _item.Expected.ExpectedNeedsClarification ? _item.GoldenUnderstanding.Unknowns : [],
-            _item.Expected.ExpectedNeedsClarification ? ["Which trigger, recipients, and delivery channel are required?"] : [],
+            status == InitiativeAnalysisStatus.NeedsClarification ? _item.GoldenUnderstanding.Unknowns : [],
+            questions,
             "Fake output validates the live harness without making a network call.");
     }
 
