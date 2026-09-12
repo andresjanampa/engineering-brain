@@ -30,9 +30,12 @@ public sealed class LiveEvaluationMetricCalculator
             Coverage("unknowns", golden.Unknowns, actual.Unknowns)
         };
         var capabilityValues = actual.TechnicalCapabilities.Concat(actual.SearchTerms).ToArray();
-        var required = item.Expected.RequiredCapabilities;
+        var required = item.UnderstandingExpectations.RequiredCapabilities;
         var requiredHits = required.Where(value => Matches(value, capabilityValues)).ToArray();
-        var acceptableHits = item.Expected.AcceptableCapabilities.Where(value => Matches(value, capabilityValues)).ToArray();
+        var acceptableHits = item.UnderstandingExpectations.AcceptableCapabilities
+            .Where(value => Matches(value, capabilityValues)).ToArray();
+        var expectedUnknownTopics = item.UnderstandingExpectations.ExpectedUnknownTopics;
+        var unknownTopicHits = expectedUnknownTopics.Where(topic => TopicMatches(topic, actual.Unknowns)).ToArray();
         var goldenSearchTokens = _normalizer.Tokenize(golden.SearchTerms).ToHashSet(StringComparer.Ordinal);
         var actualSearchTokens = _normalizer.Tokenize(actual.SearchTerms).ToHashSet(StringComparer.Ordinal);
         var extra = actualSearchTokens.Except(goldenSearchTokens, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -44,9 +47,10 @@ public sealed class LiveEvaluationMetricCalculator
             required.Count == 0 ? 1 : requiredHits.Length / (double)required.Count,
             required.Except(requiredHits, StringComparer.Ordinal).ToArray(),
             acceptableHits,
-            golden.Unknowns.Count > 0 || item.Expected.ExpectedNeedsClarification,
-            actual.Unknowns.Count > 0,
-            fields.Single(field => field.Field == "unknowns").Coverage,
+            expectedUnknownTopics.Count,
+            unknownTopicHits.Length,
+            expectedUnknownTopics.Count == 0 ? 1 : unknownTopicHits.Length / (double)expectedUnknownTopics.Count,
+            expectedUnknownTopics.Except(unknownTopicHits, StringComparer.Ordinal).ToArray(),
             fields.Single(field => field.Field == "searchTerms").Coverage,
             golden.SearchTerms.Where(value => !Matches(value, actual.SearchTerms)).ToArray(),
             extra,
@@ -56,7 +60,7 @@ public sealed class LiveEvaluationMetricCalculator
 
     public LiveRetrievalMetrics EvaluateRetrieval(
         CandidateRetrievalResult retrieval,
-        LiveEvaluationExpectations expected)
+        LiveRepositoryExpectations expected)
     {
         var entityRanks = expected.RequiredEntities.Select(required => FirstRank(
             retrieval.Components, candidate => MatchesEntity(candidate, required))).ToArray();
@@ -83,12 +87,13 @@ public sealed class LiveEvaluationMetricCalculator
     public LiveCall2Metrics EvaluateAnalysis(
         LiveEvaluationCase item,
         InitiativeAnalysis analysis,
-        IReadOnlyList<ValidatedRecommendation> validated,
+        IReadOnlyList<GovernedRecommendation> governed,
         RepositorySnapshot snapshot)
     {
+        var validated = governed.Select(value => value.ValidatedRecommendation).ToArray();
         var decisions = analysis.Recommendations.Select(value => value.Decision).ToHashSet();
-        var expectedDecision = item.Expected.AcceptableDecisionTypes.Count == 0
-            || item.Expected.AcceptableDecisionTypes.Any(decisions.Contains);
+        var expectedDecision = item.AnalysisExpectations.AcceptableDecisionTypes.Count == 0
+            || item.AnalysisExpectations.AcceptableDecisionTypes.Any(decisions.Contains);
         var requiringValidation = validated.Where(value => value.ValidationStatus != EvidenceValidationStatus.Proposal).ToArray();
         var validEvidence = requiringValidation.Sum(value => value.ValidEvidence.Count);
         var allEvidence = requiringValidation.Sum(value => value.Recommendation.Evidence.Count);
@@ -98,14 +103,16 @@ public sealed class LiveEvaluationMetricCalculator
         var referencedProjects = analysis.RelevantProjectIds.Concat(analysis.Recommendations
                 .SelectMany(value => value.Evidence).Where(value => value.ProjectId is not null).Select(value => value.ProjectId!))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var expectedEntities = item.Expected.RequiredEntities.Concat(item.Expected.AcceptableEntities).Distinct(StringComparer.Ordinal).ToArray();
-        var expectedProjects = item.Expected.RequiredProjects.Concat(item.Expected.AcceptableProjects).Distinct(StringComparer.Ordinal).ToArray();
+        var expectedEntities = item.RepositoryExpectations.RequiredEntities
+            .Concat(item.RepositoryExpectations.AcceptableEntities).Distinct(StringComparer.Ordinal).ToArray();
+        var expectedProjects = item.RepositoryExpectations.RequiredProjects
+            .Concat(item.RepositoryExpectations.AcceptableProjects).Distinct(StringComparer.Ordinal).ToArray();
         var entityHits = expectedEntities.Where(value => ReferencedEntity(value, referencedEntities, snapshot)).ToArray();
         var projectHits = expectedProjects.Where(value => ReferencedProject(value, referencedProjects, snapshot)).ToArray();
-        var expectedNeedsClarification = item.Expected.ExpectedNeedsClarification;
-        var actualNeedsClarification = analysis.Status == InitiativeAnalysisStatus.NeedsClarification;
-        var clarificationRelevant = !expectedNeedsClarification || analysis.ClarifyingQuestions.Any(question =>
-            item.GoldenUnderstanding.Unknowns.Any(unknown => SharesToken(question, unknown)));
+        var statusCorrect = item.AnalysisExpectations.AcceptableStatuses.Contains(analysis.Status);
+        var clarificationRelevant = item.AnalysisExpectations.ExpectedClarificationTopics.Count == 0
+            || item.AnalysisExpectations.ExpectedClarificationTopics
+                .All(topic => TopicMatches(topic, analysis.ClarifyingQuestions));
         var fabricatedAccepted = validated.SelectMany(value => value.ValidEvidence)
             .Count(evidence => evidence.EntityId is not null
                 && !snapshot.Entities.Any(entity => entity.Id.Equals(evidence.EntityId, StringComparison.Ordinal)));
@@ -119,15 +126,53 @@ public sealed class LiveEvaluationMetricCalculator
             validated.Count(value => value.ValidationStatus == EvidenceValidationStatus.Proposal),
             fabricatedAccepted,
             allEvidence == 0 ? 1 : validEvidence / (double)allEvidence,
-            expectedNeedsClarification,
-            actualNeedsClarification,
-            expectedNeedsClarification == actualNeedsClarification,
+            item.AnalysisExpectations.AcceptableStatuses,
+            analysis.Status,
+            statusCorrect,
             analysis.ClarifyingQuestions.Count,
             clarificationRelevant,
             entityHits,
-            item.Expected.RequiredEntities.Where(value => !entityHits.Contains(value, StringComparer.Ordinal)).ToArray(),
+            item.RepositoryExpectations.RequiredEntities
+                .Where(value => !entityHits.Contains(value, StringComparer.Ordinal)).ToArray(),
             projectHits,
-            item.Expected.RequiredProjects.Where(value => !projectHits.Contains(value, StringComparer.Ordinal)).ToArray());
+            item.RepositoryExpectations.RequiredProjects
+                .Where(value => !projectHits.Contains(value, StringComparer.Ordinal)).ToArray());
+    }
+
+    public static LivePolicyMetrics EvaluatePolicy(
+        LivePolicyExpectations expected,
+        PolicyGovernanceResult governance)
+    {
+        var policyResults = governance.Recommendations.SelectMany(value => value.PolicyResults).ToArray();
+        var activations = expected.Activations.Select(expectation =>
+        {
+            var statuses = policyResults
+                .Where(result => result.PolicyId.Equals(expectation.PolicyId, StringComparison.Ordinal))
+                .Select(result => result.ComplianceStatus)
+                .ToArray();
+            var actualActive = statuses.Any(status => status != PolicyComplianceStatus.NotApplicable);
+            return new LivePolicyActivationResult(
+                expectation.PolicyId,
+                expectation.ExpectedActive,
+                actualActive,
+                expectation.ExpectedActive == actualActive,
+                statuses);
+        }).ToArray();
+        var outcomeCorrect = expected.AcceptableOutcomes.Count == 0
+            || expected.AcceptableOutcomes.Contains(governance.Outcome);
+        var escapes = governance.Recommendations.Count(recommendation =>
+            recommendation.PolicyResults.Any(result => result.Severity == PolicySeverity.Block
+                && result.ComplianceStatus == PolicyComplianceStatus.Violated)
+            && recommendation.Disposition != RecommendationDisposition.Rejected);
+        return new LivePolicyMetrics(
+            activations,
+            activations.Length == 0 ? 1 : activations.Count(value => value.Correct) / (double)activations.Length,
+            expected.AcceptableOutcomes,
+            governance.Outcome,
+            outcomeCorrect,
+            expected.ExpectedBlockedRecommendationEscapeCount,
+            escapes,
+            escapes == expected.ExpectedBlockedRecommendationEscapeCount);
     }
 
     public static LiveEvaluationAggregate Aggregate(
@@ -138,6 +183,7 @@ public sealed class LiveEvaluationMetricCalculator
         var understandings = results.Where(value => value.UnderstandingMetrics is not null).ToArray();
         var comparisons = results.Where(value => value.RetrievalComparison is not null).ToArray();
         var call2 = successful.Where(value => value.Call2Metrics is not null).ToArray();
+        var policy = successful.Where(value => value.PolicyMetrics is not null).ToArray();
         var contexts = results.Where(value => value.Context is not null).Select(value => value.Context!.EstimatedTokens).ToArray();
         var calls = results.SelectMany(value => value.Usage).ToArray();
         var costs = estimateCost is null ? [] : calls.Select(estimateCost).Where(value => value is not null).Select(value => value!.Value).ToArray();
@@ -148,7 +194,7 @@ public sealed class LiveEvaluationMetricCalculator
             results.Count(value => value.Status == LiveEvaluationExecutionStatus.SecurityBlocked),
             results.Count(value => value.Status == LiveEvaluationExecutionStatus.StructuredOutputFailure),
             Average(understandings, value => value.UnderstandingMetrics!.RequiredCapabilityHitRate),
-            Average(understandings, value => value.UnderstandingMetrics!.ExpectedUnknowns == value.UnderstandingMetrics.UnknownsDetected ? 1 : 0),
+            Average(understandings, value => value.UnderstandingMetrics!.UnknownTopicCoverage),
             Average(comparisons, value => value.RetrievalComparison!.RecallAt5Delta),
             Average(comparisons, value => value.RetrievalComparison!.RecallAt10Delta),
             Average(comparisons, value => value.RetrievalComparison!.MeanReciprocalRankDelta),
@@ -156,7 +202,10 @@ public sealed class LiveEvaluationMetricCalculator
             Average(call2, value => value.Call2Metrics!.EvidenceValidationRate),
             call2.Sum(value => value.Call2Metrics!.InvalidEvidence),
             call2.Sum(value => value.Call2Metrics!.FabricatedEntitiesAccepted),
-            Average(call2, value => value.Call2Metrics!.NeedsClarificationCorrect ? 1 : 0),
+            Average(call2, value => value.Call2Metrics!.AnalysisStatusCorrect ? 1 : 0),
+            Average(policy, value => value.PolicyMetrics!.PolicyActivationAccuracy),
+            Average(policy, value => value.PolicyMetrics!.PolicyOutcomeCorrect ? 1 : 0),
+            policy.Sum(value => value.PolicyMetrics!.BlockedRecommendationEscapeCount),
             contexts.Length == 0 ? 0 : contexts.Average(),
             EvaluationMetricsCalculator.Median(contexts),
             contexts.Length == 0 ? 0 : contexts.Max(),
@@ -196,10 +245,17 @@ public sealed class LiveEvaluationMetricCalculator
         return expectedTokens.Count > 0 && expectedTokens.All(actualTokens.Contains);
     }
 
-    private bool SharesToken(string left, string right)
+    private bool TopicMatches(string expected, IEnumerable<string> actual)
     {
-        var rightTokens = _normalizer.Tokenize(right).ToHashSet(StringComparer.Ordinal);
-        return _normalizer.Tokenize(left).Any(rightTokens.Contains);
+        // A topic matches when all normalized non-connective tokens occur in one actual unknown or question.
+        var expectedTokens = _normalizer.Tokenize(expected)
+            .Where(token => token != "or")
+            .ToArray();
+        return expectedTokens.Length > 0 && actual.Any(value =>
+        {
+            var actualTokens = _normalizer.Tokenize(value).ToHashSet(StringComparer.Ordinal);
+            return expectedTokens.All(actualTokens.Contains);
+        });
     }
 
     private HashSet<string> RepositoryTokens(RepositorySnapshot snapshot) => _normalizer.Tokenize(
@@ -264,7 +320,8 @@ public static class LiveConsistencyCalculator
             Average(groups, group => Pairwise(group.Where(Succeeded).Select(value => value.Understanding!.TechnicalCapabilities
                 .Concat(value.Understanding.SearchTerms).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToArray())),
             Average(groups, group => Pairwise(group.Where(Succeeded).Select(value => value.Recommendations
-                .Select(item => item.ValidationStatus.ToString()).ToHashSet(StringComparer.Ordinal)).ToArray())));
+                .Select(item => item.ValidatedRecommendation.ValidationStatus.ToString())
+                .ToHashSet(StringComparer.Ordinal)).ToArray())));
 
         static bool Succeeded(LiveEvaluationCaseResult value) => value.Status == LiveEvaluationExecutionStatus.Succeeded;
         static double Average(IEnumerable<IGrouping<string, LiveEvaluationCaseResult>> source,

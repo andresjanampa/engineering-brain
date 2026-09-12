@@ -6,7 +6,7 @@ namespace EngineeringBrain.Infrastructure;
 
 public sealed class LiveEvaluationSuiteSerializer
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
 
     public async Task<LiveEvaluationSuite> LoadAsync(string path, CancellationToken cancellationToken = default)

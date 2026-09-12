@@ -40,7 +40,7 @@ Project Memory is a navigable projection, not a source of truth. The snapshot an
 
 `brain eval` benchmarks deterministic retrieval, context selection, token budgets, and the evidence contract against a versioned, non-sensitive golden corpus. It is offline and reuses one validated snapshot and Project Memory sync for the whole suite.
 
-`brain eval-live` is a separate, explicitly authorized harness for measuring the real provider pipeline. It compares CALL #1 with a golden understanding, measures golden-versus-live retrieval, validates CALL #2 evidence, records provider usage and latency, and emits a human-review artifact. Live observations do not update retrieval weights or the offline baseline.
+`brain eval-live` is a separate, explicitly authorized harness for measuring the real provider pipeline. Live evaluation schema 2 separates initiative-only understanding expectations, repository retrieval expectations, architectural analysis expectations, and local policy expectations. Expected unknown topics match deterministically when every normalized non-connective topic token occurs in one reported unknown; policy metrics are calculated from governed recommendations after evidence validation. Live observations do not update retrieval weights or the offline baseline, and historical schema 1 result artifacts are never reinterpreted or rewritten as schema 2.
 
 ## Requirements
 

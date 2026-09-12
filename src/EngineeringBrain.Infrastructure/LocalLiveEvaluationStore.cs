@@ -8,6 +8,8 @@ namespace EngineeringBrain.Infrastructure;
 
 public sealed partial class LocalLiveEvaluationStore
 {
+    public const int CurrentResultSchemaVersion = 2;
+
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
     private readonly string _dataRoot;
 
@@ -53,6 +55,29 @@ public sealed partial class LocalLiveEvaluationStore
         return run with { ResultDirectory = directory, SummaryPath = summaryPath, ReviewPath = reviewPath };
     }
 
+    public async Task<LiveEvaluationRun> LoadAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await File.ReadAllTextAsync(path, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("liveResultSchemaVersion", out var schemaVersion)
+            || schemaVersion.ValueKind != JsonValueKind.Number
+            || !schemaVersion.TryGetInt32(out var version))
+        {
+            throw new InvalidDataException("Live evaluation result does not declare a valid liveResultSchemaVersion.");
+        }
+
+        if (version != CurrentResultSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"Live evaluation result schema {version} is unsupported; expected {CurrentResultSchemaVersion}. Historical runs are not rewritten automatically.");
+        }
+
+        return JsonSerializer.Deserialize<LiveEvaluationRun>(json, JsonOptions)
+            ?? throw new InvalidDataException("Live evaluation result JSON could not be deserialized.");
+    }
+
     public static string RenderReview(LiveEvaluationRun run)
     {
         var builder = new StringBuilder();
@@ -72,6 +97,9 @@ public sealed partial class LocalLiveEvaluationStore
                 .AppendLine($"- Golden/live MRR: `{item.RetrievalComparison?.Golden.MeanReciprocalRank:F3}` / `{item.RetrievalComparison?.Actual.MeanReciprocalRank:F3}`")
                 .AppendLine($"- Evidence validation: `{item.Call2Metrics?.EvidenceValidationRate:F3}`")
                 .AppendLine($"- Invalid evidence: `{item.Call2Metrics?.InvalidEvidence ?? 0}`")
+                .AppendLine($"- Policy outcome: `{item.PolicyOutcome?.ToString() ?? "n/a"}`")
+                .AppendLine($"- Policy activation accuracy: `{item.PolicyMetrics?.PolicyActivationAccuracy:F3}`")
+                .AppendLine($"- Blocked recommendation escapes: `{item.PolicyMetrics?.BlockedRecommendationEscapeCount ?? 0}`")
                 .AppendLine($"- Error: `{Redact(item.ErrorMessage) ?? "none"}`").AppendLine();
             AppendJson(builder, "CALL #1 structured output", item.Understanding);
             AppendJson(builder, "Retrieved candidates", item.Retrieval is null ? null : new
@@ -81,7 +109,8 @@ public sealed partial class LocalLiveEvaluationStore
                 Relations = item.Retrieval.Relations.Count
             });
             AppendJson(builder, "CALL #2 structured output", item.Analysis);
-            AppendJson(builder, "Evidence validation", item.Recommendations);
+            AppendJson(builder, "Governed recommendations", item.Recommendations);
+            AppendJson(builder, "Policy metrics", item.PolicyMetrics);
             AppendJson(builder, "Usage", item.Usage);
             builder.AppendLine("### Human Review").AppendLine()
                 .AppendLine("Initiative understanding [1-5]:")
@@ -130,6 +159,7 @@ public sealed partial class LocalLiveEvaluationStore
         var options = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
             WriteIndented = true
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
