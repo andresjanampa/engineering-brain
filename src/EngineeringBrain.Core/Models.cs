@@ -16,7 +16,8 @@ public sealed record ScannedFile(
     string Extension,
     string Language,
     long SizeBytes,
-    string? ContentHash);
+    string? ContentHash,
+    DateTimeOffset LastWriteTimeUtc = default);
 
 public sealed record SourceLocation(
     string RelativeFilePath,
@@ -76,7 +77,9 @@ public sealed record RepositoryScanResult(
 
 public sealed record LanguageAnalysisRequest(
     string RepositoryRoot,
-    IReadOnlyList<ScannedFile> Files);
+    IReadOnlyList<ScannedFile> Files,
+    IReadOnlyList<string>? IncludedProjectPaths = null,
+    IReadOnlyList<CodeEntity>? ReusableEntities = null);
 
 public sealed record LanguageAnalysisResult(
     IReadOnlyList<CodeEntity> Entities,
@@ -96,4 +99,53 @@ public sealed record RepositorySnapshot(
     IReadOnlyList<CodeEntity> Entities,
     IReadOnlyList<CodeRelation> Relations,
     AnalysisSummary Analysis,
-    IReadOnlyList<AnalysisDiagnostic> Diagnostics);
+    IReadOnlyList<AnalysisDiagnostic> Diagnostics,
+    IncrementalAnalysisSummary Incremental);
+
+public sealed record FileChange(
+    FileChangeKind Kind,
+    string? CurrentPath,
+    string? PreviousPath,
+    ChangeDetectionMethod DetectionMethod,
+    string? ProjectPath,
+    string Reason);
+
+public sealed record ScanPerformanceMetrics(
+    int TotalFiles,
+    int ChangedFiles,
+    int ProjectsTotal,
+    int ProjectsAnalyzed,
+    int ProjectsReused,
+    int EntitiesReused,
+    int EntitiesRegenerated,
+    long ElapsedMilliseconds);
+
+public sealed record GraphIntegritySummary(
+    bool IsValid,
+    int DuplicateEntityIds,
+    int DuplicateRelations,
+    int DanglingRelations);
+
+public sealed record IncrementalAnalysisSummary(
+    ScanExecutionMode Mode,
+    bool PreviousSnapshotFound,
+    string? FullScanReason,
+    IReadOnlyList<FileChange> Changes,
+    IReadOnlyList<string> DirectlyAffectedProjects,
+    IReadOnlyList<string> TransitivelyAffectedProjects,
+    IReadOnlyList<string> ReanalyzedProjects,
+    IReadOnlyList<string> ReusedProjects,
+    ScanPerformanceMetrics Metrics,
+    GraphIntegritySummary GraphIntegrity);
+
+public sealed record RepositoryAnalysisResult(
+    RepositorySnapshot Snapshot,
+    string SnapshotPath);
+
+public sealed record GitRename(string PreviousPath, string CurrentPath);
+
+public sealed record SnapshotLoadResult(
+    SnapshotLoadStatus Status,
+    RepositorySnapshot? Snapshot,
+    string Path,
+    string Reason);

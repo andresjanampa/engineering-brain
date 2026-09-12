@@ -3,7 +3,7 @@ using EngineeringBrain.Core;
 
 namespace EngineeringBrain.Infrastructure;
 
-public sealed class GitInfoProvider : IGitInfoProvider
+public sealed class GitInfoProvider : IGitInfoProvider, IGitChangeProvider
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(10);
 
@@ -38,6 +38,80 @@ public sealed class GitInfoProvider : IGitInfoProvider
             remote,
             isWorkingTreeClean);
     }
+
+    public async Task<IReadOnlyList<GitRename>> GetRenamesAsync(
+        string repositoryRoot,
+        string? previousCommit,
+        string? currentCommit,
+        CancellationToken cancellationToken = default)
+    {
+        var outputs = new List<string?>();
+        if (!string.IsNullOrWhiteSpace(previousCommit)
+            && !string.IsNullOrWhiteSpace(currentCommit)
+            && !previousCommit.Equals(currentCommit, StringComparison.Ordinal))
+        {
+            outputs.Add(await RunGitAsync(
+                repositoryRoot,
+                cancellationToken,
+                "-c",
+                "core.quotepath=false",
+                "diff",
+                "--name-status",
+                "-M",
+                previousCommit,
+                currentCommit));
+        }
+
+        if (!string.IsNullOrWhiteSpace(currentCommit))
+        {
+            outputs.Add(await RunGitAsync(
+                repositoryRoot,
+                cancellationToken,
+                "-c",
+                "core.quotepath=false",
+                "diff",
+                "--name-status",
+                "-M",
+                currentCommit));
+            outputs.Add(await RunGitAsync(
+                repositoryRoot,
+                cancellationToken,
+                "-c",
+                "core.quotepath=false",
+                "diff",
+                "--cached",
+                "--name-status",
+                "-M",
+                currentCommit));
+        }
+
+        return outputs
+            .Where(output => !string.IsNullOrWhiteSpace(output))
+            .SelectMany(ParseRenames)
+            .Distinct()
+            .OrderBy(rename => rename.PreviousPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(rename => rename.CurrentPath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<GitRename> ParseRenames(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            yield break;
+        }
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var fields = line.Split('\t');
+            if (fields.Length == 3 && fields[0].StartsWith('R'))
+            {
+                yield return new GitRename(NormalizePath(fields[1]), NormalizePath(fields[2]));
+            }
+        }
+    }
+
+    private static string NormalizePath(string path) => path.Replace('\\', '/');
 
     private static async Task<string?> RunGitAsync(
         string repositoryRoot,

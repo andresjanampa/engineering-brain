@@ -173,6 +173,8 @@ internal static class CSharpSymbolExtractor
 
     public static TypeRelationResult ResolveTypeRelations(
         IReadOnlyList<SemanticExtraction> extractions,
+        IReadOnlyList<LoadedProjectContext> loadedProjects,
+        IReadOnlyList<CodeEntity> reusableEntities,
         string repositoryRoot,
         CancellationToken cancellationToken)
     {
@@ -185,12 +187,13 @@ internal static class CSharpSymbolExtractor
                     pair.Value)))
             .GroupBy(pair => pair.Key)
             .ToDictionary(group => group.Key, group => group.First().Value);
-        var projectIdsByAssembly = extractions
-            .GroupBy(extraction => extraction.AssemblyIdentity, StringComparer.Ordinal)
+        var projectIdsByAssembly = loadedProjects
+            .GroupBy(context => context.Compilation.Assembly.Identity.ToString(), StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => group.Select(item => item.ProjectId).Distinct(StringComparer.Ordinal).ToArray(),
+                group => group.Select(item => item.Discovery.Id).Distinct(StringComparer.Ordinal).ToArray(),
                 StringComparer.Ordinal);
+        var reusableById = reusableEntities.ToDictionary(entity => entity.Id, StringComparer.Ordinal);
 
         foreach (var extraction in extractions)
         {
@@ -216,6 +219,16 @@ internal static class CSharpSymbolExtractor
                         entityByProjectAndIdentity.TryGetValue(
                             new SemanticEntityKey(projectIds[0], GetSymbolIdentity(targetSymbol)),
                             out targetEntity);
+                        if (targetEntity is null
+                            && TryGetEntityType(targetSymbol, out var targetEntityType))
+                        {
+                            var targetId = StableEntityId.CreateSemantic(
+                                "C#",
+                                projectIds[0],
+                                targetEntityType,
+                                GetSymbolIdentity(targetSymbol));
+                            reusableById.TryGetValue(targetId, out targetEntity);
+                        }
                     }
                 }
 
@@ -434,6 +447,19 @@ internal static class CSharpSymbolExtractor
         PropertyDeclarationSyntax => CodeEntityType.Property,
         _ => throw new ArgumentOutOfRangeException(nameof(declaration))
     };
+
+    private static bool TryGetEntityType(ITypeSymbol symbol, out CodeEntityType entityType)
+    {
+        entityType = symbol.TypeKind switch
+        {
+            TypeKind.Interface => CodeEntityType.Interface,
+            TypeKind.Enum => CodeEntityType.Enum,
+            TypeKind.Class when symbol is INamedTypeSymbol { IsRecord: true } => CodeEntityType.Record,
+            TypeKind.Class => CodeEntityType.Class,
+            _ => default
+        };
+        return symbol.TypeKind is TypeKind.Interface or TypeKind.Enum or TypeKind.Class;
+    }
 
     private static string GetName(SyntaxNode declaration) => declaration switch
     {

@@ -4,7 +4,7 @@ Engineering Brain separates deterministic repository facts from future derived k
 
 ```text
 CLI
- |-- repository scan and Git metadata (Infrastructure)
+ |-- repository scan, Git metadata, and snapshot comparison (Infrastructure)
  |-- language analysis (language-specific analyzers)
  `-- snapshot persistence (Infrastructure)
 
@@ -29,4 +29,6 @@ Project failures are isolated. Workspace failures are associated with a project 
 
 The structured code graph records objective facts. A future project-memory wiki will contain derived architecture, capabilities, initiatives, decisions, and risks. Project memory can cite the graph and source evidence, but it cannot replace code as the source of truth.
 
-Snapshot schema 2 includes branch, commit, timestamp, files, hashes, projects, analysis modes, diagnostics, entities, relations, and categorical resolution levels so a later iteration can compare repository states and selectively re-analyze changed files.
+Incremental scans compare schema-compatible snapshots, resolve changed files to projects, invalidate transitive dependents, selectively invoke analyzers, merge reusable graph partitions, and validate IDs and relation endpoints before atomically replacing `latest.json`.
+
+Snapshot schema 3 adds safe file timestamps, file changes, project reuse decisions, performance metrics, and graph-integrity results to the existing evidence contract.

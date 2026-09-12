@@ -32,44 +32,13 @@ internal static class BrainCli
         try
         {
             IRepositoryScanner scanner = new RepositoryScanner();
-            IGitInfoProvider git = new GitInfoProvider();
+            var git = new GitInfoProvider();
             IReadOnlyList<ILanguageAnalyzer> analyzers = [new CSharpAnalyzer()];
             IRepositorySnapshotStore store = new LocalRepositorySnapshotStore();
+            var engine = new RepositoryAnalysisEngine(scanner, git, analyzers, store, git);
+            var result = await engine.ScanAsync(path, cancellation.Token);
 
-            var scan = await scanner.ScanAsync(path, cancellation.Token);
-            var gitInfo = await git.GetInfoAsync(scan.Repository.Root, cancellation.Token);
-            var analysisRequest = new LanguageAnalysisRequest(scan.Repository.Root, scan.Files);
-
-            var entities = new List<CodeEntity>();
-            var relations = new List<CodeRelation>();
-            var projects = new List<ProjectInfo>();
-            var diagnostics = new List<AnalysisDiagnostic>();
-            AnalysisSummary? analysis = null;
-            foreach (var analyzer in analyzers)
-            {
-                var result = await analyzer.AnalyzeAsync(analysisRequest, cancellation.Token);
-                entities.AddRange(result.Entities);
-                relations.AddRange(result.Relations);
-                projects.AddRange(result.Projects);
-                diagnostics.AddRange(result.Diagnostics);
-                analysis = result.Analysis;
-            }
-
-            var snapshot = new RepositorySnapshot(
-                SchemaVersion: SnapshotJsonSerializer.CurrentSchemaVersion,
-                GeneratedAtUtc: DateTimeOffset.UtcNow,
-                scan.Repository,
-                gitInfo,
-                scan.Files,
-                scan.Languages,
-                projects,
-                entities,
-                relations,
-                analysis ?? new AnalysisSummary(AnalysisMode.SyntaxFallback, "none", 0, 0, 0),
-                diagnostics);
-            var snapshotPath = await store.SaveAsync(snapshot, cancellation.Token);
-
-            WriteSummary(snapshot, snapshotPath);
+            WriteSummary(result.Snapshot, result.SnapshotPath);
             return 0;
         }
         catch (OperationCanceledException)
@@ -94,6 +63,32 @@ internal static class BrainCli
         Console.WriteLine($"Commit: {snapshot.Git.HeadCommit ?? "n/a"}");
         Console.WriteLine($"Working tree: {FormatWorkingTree(snapshot.Git)}");
 
+        WriteSection("Scan");
+        Console.WriteLine($"Mode: {snapshot.Incremental.Mode}");
+        Console.WriteLine($"Previous snapshot: {(snapshot.Incremental.PreviousSnapshotFound ? "found" : "not found")}");
+        if (snapshot.Incremental.FullScanReason is not null)
+        {
+            Console.WriteLine($"Reason: {snapshot.Incremental.FullScanReason}");
+        }
+
+        WriteSection("Changes");
+        foreach (var kind in Enum.GetValues<FileChangeKind>())
+        {
+            Console.WriteLine($"{kind}: {snapshot.Incremental.Changes.Count(change => change.Kind == kind)}");
+        }
+        foreach (var change in snapshot.Incremental.Changes.Take(10))
+        {
+            var path = change.Kind == FileChangeKind.Renamed
+                ? $"{change.PreviousPath} -> {change.CurrentPath}"
+                : change.CurrentPath ?? change.PreviousPath ?? "unknown";
+            var project = change.ProjectPath is null ? string.Empty : $"; project: {change.ProjectPath}";
+            Console.WriteLine($"- {change.Kind}: {path} ({change.DetectionMethod}{project})");
+        }
+        if (snapshot.Incremental.Changes.Count > 10)
+        {
+            Console.WriteLine($"Additional changes saved in snapshot: {snapshot.Incremental.Changes.Count - 10}");
+        }
+
         WriteSection("Files");
         Console.WriteLine($"Total: {snapshot.Files.Count}");
 
@@ -107,6 +102,12 @@ internal static class BrainCli
         Console.WriteLine($"Detected: {snapshot.Analysis.DetectedProjects}");
         Console.WriteLine($"Semantic: {snapshot.Analysis.SemanticProjects}");
         Console.WriteLine($"Fallback: {snapshot.Analysis.FallbackProjects}");
+        Console.WriteLine($"Reanalyzed: {snapshot.Incremental.Metrics.ProjectsAnalyzed}");
+        Console.WriteLine($"Reused: {snapshot.Incremental.Metrics.ProjectsReused}");
+
+        WriteProjectList("Directly affected", snapshot.Incremental.DirectlyAffectedProjects);
+        WriteProjectList("Transitively affected", snapshot.Incremental.TransitivelyAffectedProjects);
+        WriteProjectList("Reuse", snapshot.Incremental.ReusedProjects);
 
         WriteSection("C# Analysis");
         Console.WriteLine($"Mode: {snapshot.Analysis.Mode}");
@@ -114,6 +115,14 @@ internal static class BrainCli
         Console.WriteLine($"Entities: {snapshot.Entities.Count}");
         Console.WriteLine($"Relations: {snapshot.Relations.Count}");
         Console.WriteLine($"Diagnostics: {snapshot.Diagnostics.Count}");
+
+        WriteSection("Incremental Metrics");
+        Console.WriteLine($"Files: {snapshot.Incremental.Metrics.TotalFiles}");
+        Console.WriteLine($"Changed files: {snapshot.Incremental.Metrics.ChangedFiles}");
+        Console.WriteLine($"Entities reused: {snapshot.Incremental.Metrics.EntitiesReused}");
+        Console.WriteLine($"Entities regenerated: {snapshot.Incremental.Metrics.EntitiesRegenerated}");
+        Console.WriteLine($"Elapsed: {snapshot.Incremental.Metrics.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Graph integrity: {(snapshot.Incremental.GraphIntegrity.IsValid ? "valid" : "invalid")}");
 
         WriteSection("Architecture");
         foreach (var type in Enum.GetValues<CodeEntityType>())
@@ -174,6 +183,20 @@ internal static class BrainCli
         CodeEntityType.Property => "Properties",
         _ => $"{type}s"
     };
+
+    private static void WriteProjectList(string title, IReadOnlyList<string> projects)
+    {
+        if (projects.Count == 0)
+        {
+            return;
+        }
+
+        WriteSection(title);
+        foreach (var project in projects)
+        {
+            Console.WriteLine(project);
+        }
+    }
 
     private static void WriteSection(string title)
     {

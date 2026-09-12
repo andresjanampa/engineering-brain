@@ -10,9 +10,20 @@ public interface IGitInfoProvider
     Task<GitInfo> GetInfoAsync(string repositoryRoot, CancellationToken cancellationToken = default);
 }
 
+public interface IGitChangeProvider
+{
+    Task<IReadOnlyList<GitRename>> GetRenamesAsync(
+        string repositoryRoot,
+        string? previousCommit,
+        string? currentCommit,
+        CancellationToken cancellationToken = default);
+}
+
 public interface ILanguageAnalyzer
 {
     string Language { get; }
+
+    string Version { get; }
 
     Task<LanguageAnalysisResult> AnalyzeAsync(
         LanguageAnalysisRequest request,
@@ -21,5 +32,9 @@ public interface ILanguageAnalyzer
 
 public interface IRepositorySnapshotStore
 {
+    Task<SnapshotLoadResult> LoadLatestAsync(
+        string repositoryId,
+        CancellationToken cancellationToken = default);
+
     Task<string> SaveAsync(RepositorySnapshot snapshot, CancellationToken cancellationToken = default);
 }

@@ -12,6 +12,8 @@ Keep these rules true as the product evolves:
 - Do not fabricate relationships. Missing data is better than false certainty.
 - Prefer semantic evidence over string matching. Never claim semantic resolution when project loading is incomplete or ambiguous.
 - Degrade gracefully per project. Clearly labeled partial and syntax-fallback results remain valid; one broken project must not invalidate healthy projects.
+- Reuse incremental results only when unchanged inputs and dependency isolation make that reuse demonstrably safe.
+- Prefer extra reanalysis over stale knowledge when change impact is uncertain.
 - Prefer focused tests for analyzers, especially parsing, semantic resolution, evidence locations, and stable identities.
 - Preserve snapshot and CLI backward compatibility as the product evolves, or document and version intentional breaks.
 - Avoid infrastructure and abstractions until a demonstrated use case needs them.
