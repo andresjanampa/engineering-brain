@@ -26,8 +26,17 @@ public sealed partial class ReviewedConceptValidator
         }
 
         var declarations = new List<ReviewedConceptDeclaration>();
-        foreach (var declaration in catalog.Declarations.OrderBy(item => item.ConceptId, StringComparer.Ordinal))
+        foreach (var declaration in catalog.Declarations.OrderBy(item => item?.ConceptId, StringComparer.Ordinal))
         {
+            if (declaration is null)
+            {
+                diagnostics.Add(DeclarationError(
+                    "RC208",
+                    "Reviewed concept declaration structure is incomplete.",
+                    null));
+                continue;
+            }
+
             var declarationDiagnostics = ValidateDeclaration(declaration);
             if (declarationDiagnostics.Count > 0)
             {
@@ -37,13 +46,14 @@ public sealed partial class ReviewedConceptValidator
 
             var assignments = new List<ReviewedConceptAssignment>();
             var duplicateAssignments = declaration.Assignments
+                .Where(item => item is not null)
                 .GroupBy(item => item.EntityId, StringComparer.Ordinal)
                 .Where(group => group.Count() > 1)
                 .Select(group => group.Key)
                 .ToHashSet(StringComparer.Ordinal);
             foreach (var assignment in declaration.Assignments
-                         .OrderBy(item => item.EntityId, StringComparer.Ordinal)
-                         .ThenBy(item => item.SourceReference, StringComparer.Ordinal))
+                         .OrderBy(item => item?.EntityId, StringComparer.Ordinal)
+                         .ThenBy(item => item?.SourceReference, StringComparer.Ordinal))
             {
                 var diagnostic = ValidateAssignment(declaration.ConceptId, assignment, duplicateAssignments);
                 if (diagnostic is not null)
@@ -66,21 +76,29 @@ public sealed partial class ReviewedConceptValidator
         ReviewedConceptEvidenceContext evidence)
     {
         var diagnostics = new List<ReviewedConceptDiagnostic>();
+        AddCatalogError(catalog.RepositoryId is null
+                || catalog.Branch is null
+                || catalog.BranchKey is null
+                || catalog.SourceAnalyzerVersion is null
+                || catalog.VocabularyVersion is null
+                || catalog.Declarations is null,
+            "RC108", "Reviewed concept catalog structure is incomplete.", diagnostics);
         AddCatalogError(catalog.SchemaVersion != ReviewedConceptSerializer.CurrentSchemaVersion, "RC100",
             "Reviewed concept schema is incompatible.", diagnostics);
-        AddCatalogError(!catalog.RepositoryId.Equals(evidence.RepositoryId, StringComparison.Ordinal), "RC101",
+        AddCatalogError(!string.Equals(catalog.RepositoryId, evidence.RepositoryId, StringComparison.Ordinal), "RC101",
             "Reviewed concept repository identity does not match current evidence.", diagnostics);
-        AddCatalogError(!catalog.Branch.Equals(evidence.Branch, StringComparison.Ordinal), "RC102",
+        AddCatalogError(!string.Equals(catalog.Branch, evidence.Branch, StringComparison.Ordinal), "RC102",
             "Reviewed concept branch does not match current evidence.", diagnostics);
-        AddCatalogError(!catalog.BranchKey.Equals(evidence.BranchKey, StringComparison.Ordinal), "RC103",
+        AddCatalogError(!string.Equals(catalog.BranchKey, evidence.BranchKey, StringComparison.Ordinal), "RC103",
             "Reviewed concept branch key does not match current evidence.", diagnostics);
         AddCatalogError(catalog.SourceSnapshotSchema != evidence.SourceSnapshotSchema, "RC104",
             "Reviewed concept snapshot schema does not match current evidence.", diagnostics);
-        AddCatalogError(!catalog.SourceAnalyzerVersion.Equals(evidence.SourceAnalyzerVersion, StringComparison.Ordinal),
+        AddCatalogError(!string.Equals(catalog.SourceAnalyzerVersion, evidence.SourceAnalyzerVersion, StringComparison.Ordinal),
             "RC105", "Reviewed concept analyzer version does not match current evidence.", diagnostics);
         AddCatalogError(string.IsNullOrWhiteSpace(catalog.VocabularyVersion), "RC106",
             "Reviewed concept vocabulary version is missing.", diagnostics);
-        AddCatalogError(catalog.Declarations
+        AddCatalogError(catalog.Declarations is not null && catalog.Declarations
+                .Where(item => item is not null)
                 .GroupBy(item => item.ConceptId, StringComparer.Ordinal)
                 .Any(group => group.Count() > 1),
             "RC107", "Reviewed concept identifiers must be unique.", diagnostics);
@@ -90,6 +108,26 @@ public sealed partial class ReviewedConceptValidator
     private List<ReviewedConceptDiagnostic> ValidateDeclaration(ReviewedConceptDeclaration declaration)
     {
         var diagnostics = new List<ReviewedConceptDiagnostic>();
+        if (declaration.ConceptId is null
+            || declaration.Definition is null
+            || declaration.AnchorTokens is null
+            || declaration.AnchorTokens.Any(group => group is null || group.Any(token => token is null))
+            || declaration.QualificationSupportTokens is null
+            || declaration.QualificationSupportTokens.Any(token => token is null)
+            || declaration.ContextSupportTokens is null
+            || declaration.ContextSupportTokens.Any(token => token is null)
+            || declaration.Assignments is null
+            || declaration.Provenance is null
+            || declaration.Review is null
+            || declaration.Fingerprint is null)
+        {
+            diagnostics.Add(DeclarationError(
+                "RC208",
+                "Reviewed concept declaration structure is incomplete.",
+                declaration.ConceptId));
+            return diagnostics;
+        }
+
         AddDeclarationError(!ConceptIdPattern().IsMatch(declaration.ConceptId), "RC200",
             "Reviewed concept identifier is invalid.", declaration.ConceptId, diagnostics);
         AddDeclarationError(string.IsNullOrWhiteSpace(declaration.Definition), "RC201",
@@ -144,9 +182,18 @@ public sealed partial class ReviewedConceptValidator
 
     private static ReviewedConceptDiagnostic? ValidateAssignment(
         string conceptId,
-        ReviewedConceptAssignment assignment,
+        ReviewedConceptAssignment? assignment,
         IReadOnlySet<string> duplicateAssignments)
     {
+        if (assignment is null)
+        {
+            return AssignmentError(
+                "RC304",
+                "Reviewed concept assignment structure is incomplete.",
+                conceptId,
+                null);
+        }
+
         if (string.IsNullOrWhiteSpace(assignment.EntityId))
         {
             return AssignmentError("RC300", "Reviewed concept assignment entity identity is missing.", conceptId,
@@ -223,6 +270,16 @@ public sealed partial class ReviewedConceptValidator
                 conceptId));
         }
     }
+
+    private static ReviewedConceptDiagnostic DeclarationError(
+        string code,
+        string message,
+        string? conceptId) => new(
+        code,
+        AnalysisDiagnosticSeverity.Warning,
+        ReviewedConceptDiagnosticScope.Declaration,
+        message,
+        conceptId);
 
     private static ReviewedConceptDiagnostic AssignmentError(
         string code,

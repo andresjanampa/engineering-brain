@@ -36,6 +36,57 @@ public sealed class ReviewedConceptValidatorTests
         Assert.Contains(result.Diagnostics, item => item.Scope == ReviewedConceptDiagnosticScope.Catalog);
     }
 
+    [Theory]
+    [InlineData("repository")]
+    [InlineData("branch")]
+    [InlineData("declarations")]
+    public void Validate_NullEnvelopeMemberDisablesCatalogWithoutThrowing(string member)
+    {
+        var catalog = ReviewedConceptTestData.Catalog();
+        catalog = member switch
+        {
+            "repository" => catalog with { RepositoryId = null! },
+            "branch" => catalog with { Branch = null! },
+            "declarations" => catalog with { Declarations = null! },
+            _ => throw new InvalidOperationException()
+        };
+
+        var result = new ReviewedConceptValidator().Validate(catalog, ReviewedConceptTestData.Evidence());
+
+        Assert.False(result.CatalogIsValid);
+        Assert.Empty(result.Declarations);
+        Assert.Contains(result.Diagnostics, item => item.Scope == ReviewedConceptDiagnosticScope.Catalog);
+    }
+
+    [Fact]
+    public void Validate_IncompleteDeclarationIsExcludedWhileValidSiblingRemains()
+    {
+        var valid = ReviewedConceptTestData.WithFingerprint(
+            ReviewedConceptTestData.Declaration("valid-concept", "entity:business-service") with
+            {
+                AnchorPolicy = ReviewedConceptAnchorPolicy.NotRequired,
+                AnchorTokens = [],
+                QualificationSupportTokens = []
+            });
+        var incomplete = ReviewedConceptTestData.Declaration("incomplete-concept", "entity:model") with
+        {
+            AnchorTokens = null!,
+            Assignments = null!,
+            Provenance = null!,
+            Review = null!
+        };
+
+        var result = new ReviewedConceptValidator().Validate(
+            ReviewedConceptTestData.Catalog() with { Declarations = [valid, incomplete] },
+            ReviewedConceptTestData.Evidence());
+
+        Assert.True(result.CatalogIsValid);
+        Assert.Single(result.Declarations, item => item.ConceptId == "valid-concept");
+        Assert.Contains(result.Diagnostics,
+            item => item.Scope == ReviewedConceptDiagnosticScope.Declaration
+                && item.ConceptId == "incomplete-concept");
+    }
+
     [Fact]
     public void Validate_InvalidDeclarationAndAssignmentAreLocalized()
     {

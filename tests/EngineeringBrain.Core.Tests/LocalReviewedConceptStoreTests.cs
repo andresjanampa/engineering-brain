@@ -35,6 +35,29 @@ public sealed class LocalReviewedConceptStoreTests
         Assert.DoesNotContain(fixture.Path, result.Diagnostics[0].Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("{\"schemaVersion\":1}")]
+    [InlineData("{\"schemaVersion\":1,\"repositoryId\":null,\"branch\":\"main\",\"branchKey\":\"main--key\",\"sourceSnapshotSchema\":3,\"sourceAnalyzerVersion\":\"analyzer\",\"vocabularyVersion\":\"v2\",\"declarations\":[]}")]
+    [InlineData("{\"schemaVersion\":1,\"repositoryId\":\"repository\",\"branch\":null,\"branchKey\":\"main--key\",\"sourceSnapshotSchema\":3,\"sourceAnalyzerVersion\":\"analyzer\",\"vocabularyVersion\":\"v2\",\"declarations\":[]}")]
+    [InlineData("{\"schemaVersion\":1,\"repositoryId\":\"repository\",\"branch\":\"main\",\"branchKey\":\"main--key\",\"sourceSnapshotSchema\":3,\"sourceAnalyzerVersion\":\"analyzer\",\"vocabularyVersion\":\"v2\",\"declarations\":null}")]
+    [InlineData("{\"schemaVersion\":1,\"repositoryId\":\"repository\",\"branch\":\"main\",\"branchKey\":\"main--key\",\"sourceSnapshotSchema\":3,\"sourceAnalyzerVersion\":\"analyzer\",\"vocabularyVersion\":\"v2\",\"declarations\":[null]}")]
+    [InlineData("{\"schemaVersion\":1,\"repositoryId\":\"repository\",\"branch\":\"main\",\"branchKey\":\"main--key\",\"sourceSnapshotSchema\":3,\"sourceAnalyzerVersion\":\"analyzer\",\"vocabularyVersion\":\"v2\",\"declarations\":[{\"conceptId\":\"incomplete\"}]}")]
+    public async Task LoadAsync_StructurallyIncompleteArtifactReturnsInvalid(string json)
+    {
+        using var fixture = new TemporaryDirectory();
+        var store = new LocalReviewedConceptStore();
+        var path = store.GetPath(fixture.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, json);
+
+        var result = await store.LoadAsync(fixture.Path);
+
+        Assert.Equal(ReviewedConceptLoadStatus.Invalid, result.Status);
+        Assert.Null(result.Catalog);
+        Assert.Empty(result.ContentHash ?? string.Empty);
+        Assert.Single(result.Diagnostics, item => item.Code == "RC001");
+    }
+
     [Fact]
     public async Task LoadAsync_ValidArtifactReturnsCatalogAndContentHash()
     {

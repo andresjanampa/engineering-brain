@@ -23,8 +23,14 @@ public static class ReviewedConceptSerializer
         ArgumentNullException.ThrowIfNull(json);
         try
         {
-            return JsonSerializer.Deserialize<ReviewedConceptCatalog>(json, Options)
+            var catalog = JsonSerializer.Deserialize<ReviewedConceptCatalog>(json, Options)
                 ?? throw new InvalidDataException("Reviewed concept catalog is empty.");
+            if (!HasCompleteStructure(catalog))
+            {
+                throw new InvalidDataException("Reviewed concept catalog structure is invalid.");
+            }
+
+            return catalog;
         }
         catch (JsonException exception)
         {
@@ -35,6 +41,34 @@ public static class ReviewedConceptSerializer
             throw new InvalidDataException("Reviewed concept JSON is invalid.", exception);
         }
     }
+
+    private static bool HasCompleteStructure(ReviewedConceptCatalog catalog) =>
+        catalog.RepositoryId is not null
+        && catalog.Branch is not null
+        && catalog.BranchKey is not null
+        && catalog.SourceAnalyzerVersion is not null
+        && catalog.VocabularyVersion is not null
+        && catalog.Declarations is not null
+        && catalog.Declarations.All(declaration => declaration is not null
+            && declaration.ConceptId is not null
+            && declaration.Definition is not null
+            && declaration.AnchorTokens is not null
+            && declaration.AnchorTokens.All(group => group is not null && group.All(token => token is not null))
+            && declaration.QualificationSupportTokens is not null
+            && declaration.QualificationSupportTokens.All(token => token is not null)
+            && declaration.ContextSupportTokens is not null
+            && declaration.ContextSupportTokens.All(token => token is not null)
+            && declaration.Assignments is not null
+            && declaration.Assignments.All(assignment => assignment is not null
+                && assignment.EntityId is not null
+                && assignment.SourceReference is not null
+                && assignment.SourceFingerprint is not null)
+            && declaration.Provenance is not null
+            && declaration.Provenance.SourceReference is not null
+            && declaration.Provenance.SourceHash is not null
+            && declaration.Review is not null
+            && declaration.Review.Reviewer is not null
+            && declaration.Fingerprint is not null);
 
     public static ReviewedConceptCatalog Canonicalize(ReviewedConceptCatalog catalog) => catalog with
     {
