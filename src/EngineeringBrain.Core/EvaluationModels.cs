@@ -162,7 +162,7 @@ public sealed record EvaluationRunResult(
     IReadOnlyList<EvaluationRegression> Regressions,
     string BaselineStatus,
     string ResultPath,
-    ReviewedConceptResolutionStatus ReviewedConceptStatus = ReviewedConceptResolutionStatus.Absent,
+    ReviewedConceptResolutionStatus ReviewedConceptStatus = ReviewedConceptResolutionStatus.Unknown,
     string? ReviewedConceptCatalogFingerprint = null,
     int ReviewedConceptProfileCount = 0);
 

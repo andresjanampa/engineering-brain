@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using EngineeringBrain.Core;
 using EngineeringBrain.Infrastructure;
 
@@ -251,6 +254,48 @@ public sealed class EvaluationMetricsTests
         }
     }
 
+    [Fact]
+    public void ResultSerialization_MissingReviewedConceptProvenanceDefaultsToUnknown()
+    {
+        var options = EvaluationJsonOptions();
+        var legacy = JsonNode.Parse(JsonSerializer.Serialize(
+            RunResult(ReviewedConceptResolutionStatus.Valid, "catalog-fingerprint", 3),
+            options))!.AsObject();
+        legacy.Remove("reviewedConceptStatus");
+        legacy.Remove("reviewedConceptCatalogFingerprint");
+        legacy.Remove("reviewedConceptProfileCount");
+
+        var loaded = JsonSerializer.Deserialize<EvaluationRunResult>(legacy.ToJsonString(), options)!;
+
+        Assert.Equal("Unknown", loaded.ReviewedConceptStatus.ToString());
+        Assert.Null(loaded.ReviewedConceptCatalogFingerprint);
+        Assert.Equal(0, loaded.ReviewedConceptProfileCount);
+    }
+
+    [Theory]
+    [InlineData("Unknown", null, 0)]
+    [InlineData("Absent", null, 0)]
+    [InlineData("Valid", "catalog-fingerprint", 3)]
+    [InlineData("ValidWithDiagnostics", "catalog-fingerprint", 2)]
+    [InlineData("Invalid", "catalog-fingerprint", 0)]
+    public void ResultSerialization_RoundTripsReviewedConceptProvenance(
+        string statusName,
+        string? fingerprint,
+        int profileCount)
+    {
+        var options = EvaluationJsonOptions();
+        var status = Enum.Parse<ReviewedConceptResolutionStatus>(statusName);
+
+        var json = JsonSerializer.Serialize(RunResult(status, fingerprint, profileCount), options);
+        var loaded = JsonSerializer.Deserialize<EvaluationRunResult>(json, options)!;
+        using var document = JsonDocument.Parse(json);
+
+        Assert.Equal(JsonValueKind.String, document.RootElement.GetProperty("reviewedConceptStatus").ValueKind);
+        Assert.Equal(status, loaded.ReviewedConceptStatus);
+        Assert.Equal(fingerprint, loaded.ReviewedConceptCatalogFingerprint);
+        Assert.Equal(profileCount, loaded.ReviewedConceptProfileCount);
+    }
+
     private static EvaluationAggregateMetrics Aggregate() => new(
         Cases: 1, Passed: 1, RecallAt5: 1, RecallAt10: 1, PrecisionAt5: 0.5, PrecisionAt10: 0.5,
         MeanReciprocalRank: 1, ProjectRecallAt3: 1, ProjectMeanReciprocalRank: 1,
@@ -260,6 +305,43 @@ public sealed class EvaluationMetricsTests
         MedianCall2Tokens: 1000, MaximumCall2Tokens: 1000, BudgetViolations: 0,
         EvidenceValidationRate: 1, InvalidEvidenceCount: 0, FabricatedEntitiesAccepted: 0,
         NeedsClarificationExpected: 0, NeedsClarificationActual: 0);
+
+    private static EvaluationRunResult RunResult(
+        ReviewedConceptResolutionStatus status,
+        string? fingerprint,
+        int profileCount)
+    {
+        var aggregate = Aggregate();
+        return new EvaluationRunResult(
+            1,
+            "suite",
+            "repository",
+            "feature/concepts",
+            "analyzer",
+            EvaluationHarness.RetrievalVersion,
+            new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero),
+            aggregate,
+            new EvaluationGroupedMetrics(aggregate, aggregate, aggregate),
+            [],
+            [],
+            [],
+            "Compared",
+            string.Empty,
+            status,
+            fingerprint,
+            profileCount);
+    }
+
+    private static JsonSerializerOptions EvaluationJsonOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        return options;
+    }
 
     private static EvaluationBaseline Baseline(EvaluationAggregateMetrics aggregate) => new(
         1, "suite", "analyzer", EvaluationHarness.RetrievalVersion, 1, aggregate, []);

@@ -270,6 +270,6 @@ public sealed record LiveEvaluationRun(
     string ResultDirectory,
     string SummaryPath,
     string ReviewPath,
-    ReviewedConceptResolutionStatus ReviewedConceptStatus = ReviewedConceptResolutionStatus.Absent,
+    ReviewedConceptResolutionStatus ReviewedConceptStatus = ReviewedConceptResolutionStatus.Unknown,
     string? ReviewedConceptCatalogFingerprint = null,
     int ReviewedConceptProfileCount = 0);

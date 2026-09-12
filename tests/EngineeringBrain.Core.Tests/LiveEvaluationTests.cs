@@ -548,7 +548,7 @@ public sealed class LiveEvaluationTests
     }
 
     [Fact]
-    public async Task LiveResultStore_MissingReviewedConceptProvenanceDefaultsToAbsent()
+    public async Task LiveResultStore_MissingReviewedConceptProvenanceDefaultsToUnknown()
     {
         using var fixture = await Fixture.CreateAsync();
         var result = await fixture.RunAsync(FakeFactory(fixture));
@@ -558,6 +558,19 @@ public sealed class LiveEvaluationTests
         historical.Remove("reviewedConceptProfileCount");
         await File.WriteAllTextAsync(result.SummaryPath, historical.ToJsonString());
 
+        var loaded = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+
+        Assert.Equal("Unknown", loaded.ReviewedConceptStatus.ToString());
+        Assert.Null(loaded.ReviewedConceptCatalogFingerprint);
+        Assert.Equal(0, loaded.ReviewedConceptProfileCount);
+    }
+
+    [Fact]
+    public async Task LiveResultStore_ExplicitAbsentReviewedConceptProvenanceRoundTripsAsAbsent()
+    {
+        using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.RunAsync(FakeFactory(fixture));
         var loaded = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
 
         Assert.Equal(ReviewedConceptResolutionStatus.Absent, loaded.ReviewedConceptStatus);

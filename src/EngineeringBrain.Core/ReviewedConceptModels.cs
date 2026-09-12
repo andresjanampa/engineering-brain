@@ -19,7 +19,8 @@ public enum ReviewedConceptResolutionStatus
     Absent,
     Valid,
     ValidWithDiagnostics,
-    Invalid
+    Invalid,
+    Unknown
 }
 
 public enum ReviewedConceptDiagnosticScope
