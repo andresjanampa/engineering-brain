@@ -122,6 +122,32 @@ public sealed class ConceptCandidateRerankerTests
     }
 
     [Fact]
+    public void Rerank_E2PreservesLexicalOrderBetweenEqualExactIdentityCandidates()
+    {
+        var service = ReviewedConceptTestData.Candidate(
+            "entity:service",
+            36,
+            "ProjectMemoryService",
+            [new MatchReason("exact component name", "ProjectMemoryService", 32)]);
+        var validator = ReviewedConceptTestData.Candidate(
+            "entity:validator",
+            36,
+            "ProjectMemoryValidator",
+            [new MatchReason("exact component name", "ProjectMemoryValidator", 32)]);
+        var profile = ReviewedConceptTestData.Profile(
+            validator.EntityId,
+            ReviewedConceptTestData.Concept("project-memory-integrity-validation"));
+
+        var result = new ConceptCandidateReranker().Rerank(
+            [service, validator],
+            ["integrity", "memory", "project", "validation"],
+            [profile]);
+
+        Assert.Equal([service.EntityId, validator.EntityId], result.Select(item => item.EntityId));
+        Assert.True(result[1].Score > result[0].Score);
+    }
+
+    [Fact]
     public void Rerank_StableIdentityBreaksEqualFinalScoreTies()
     {
         var beta = ReviewedConceptTestData.Candidate("entity:beta", 10, "Beta");

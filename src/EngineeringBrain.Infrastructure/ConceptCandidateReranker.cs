@@ -42,11 +42,11 @@ public sealed class ConceptCandidateReranker
                     .ToArray(),
                 StringComparer.Ordinal);
 
-        var scored = lexicalCandidates.Select(candidate =>
+        var scored = lexicalCandidates.Select((candidate, lexicalRank) =>
         {
             if (!profilesByEntity.TryGetValue(candidate.EntityId, out var concepts))
             {
-                return new ScoredCandidate(candidate, candidate.Score, ExactTier(candidate));
+                return new ScoredCandidate(candidate, candidate.Score, ExactTier(candidate), lexicalRank);
             }
 
             var remaining = MaximumCandidateContribution;
@@ -80,7 +80,7 @@ public sealed class ConceptCandidateReranker
                 Score = candidate.Score + contribution,
                 MatchReasons = OrderReasons(reasons)
             };
-            return new ScoredCandidate(reranked, candidate.Score, ExactTier(candidate));
+            return new ScoredCandidate(reranked, candidate.Score, ExactTier(candidate), lexicalRank);
         }).ToList();
 
         scored.Sort(CompareFinal);
@@ -131,7 +131,9 @@ public sealed class ConceptCandidateReranker
                 {
                     var weaker = candidates[weakerIndex];
                     var stronger = candidates[strongerIndex];
-                    if (stronger.ExactTier <= weaker.ExactTier || stronger.LexicalScore < weaker.LexicalScore)
+                    var exactPrecedenceApplies = stronger.ExactTier > weaker.ExactTier
+                        || (stronger.ExactTier > 0 && stronger.ExactTier == weaker.ExactTier);
+                    if (!exactPrecedenceApplies || stronger.LexicalRank >= weaker.LexicalRank)
                     {
                         continue;
                     }
@@ -183,5 +185,6 @@ public sealed class ConceptCandidateReranker
     private sealed record ScoredCandidate(
         ComponentCandidate Candidate,
         int LexicalScore,
-        int ExactTier);
+        int ExactTier,
+        int LexicalRank);
 }
