@@ -17,6 +17,98 @@ public sealed class LiveEvaluationTests
     }
 
     [Fact]
+    public async Task SecurityRetrievalSuite_DefinesFiveBoundedSchemaTwoCases()
+    {
+        var suitePath = FindRepositoryFile("evaluations", "security-retrieval-live-suite.json");
+        var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(suitePath);
+        var expectedIds = new[]
+        {
+            "live-security-outbound-source-bodies",
+            "live-security-environment-secrets",
+            "live-security-absolute-path-excerpts",
+            "live-security-raw-snapshot-upload",
+            "live-security-bounded-context-control"
+        };
+
+        Assert.Equal(2, suite.LiveEvaluationSchemaVersion);
+        Assert.Equal(expectedIds, suite.Cases.Select(item => item.Id));
+        Assert.Equal(5, suite.Cases.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(10, LiveEvaluationPlanner.Create(suite).ExpectedLogicalCalls);
+        var selected = LiveEvaluationPlanner.Create(suite, caseIds: [expectedIds[1]]);
+        Assert.Equal(expectedIds[1], Assert.Single(selected.Cases).Id);
+        Assert.Equal(2, selected.ExpectedLogicalCalls);
+
+        var suiteRoot = Path.GetDirectoryName(Path.GetFullPath(suitePath))!;
+        foreach (var item in suite.Cases)
+        {
+            var initiativePath = LiveEvaluationSuiteSerializer.ResolveWithin(suiteRoot, item.InitiativePath);
+            Assert.True(File.Exists(initiativePath));
+            Assert.StartsWith(suiteRoot + Path.DirectorySeparatorChar, initiativePath, StringComparison.OrdinalIgnoreCase);
+            var call1Expectations = JsonSerializer.Serialize(new
+            {
+                item.GoldenUnderstanding,
+                item.UnderstandingExpectations
+            });
+            Assert.DoesNotContain(nameof(OutboundContextGuard), call1Expectations, StringComparison.Ordinal);
+            Assert.DoesNotContain(nameof(InitiativeContextBuilder), call1Expectations, StringComparison.Ordinal);
+            Assert.DoesNotContain(nameof(OpenAIReasoningProvider), call1Expectations, StringComparison.Ordinal);
+            Assert.Equal(["EngineeringBrain.Infrastructure"], item.RepositoryExpectations.RequiredProjects);
+            Assert.Empty(item.PolicyExpectations.Activations);
+            Assert.Empty(item.PolicyExpectations.AcceptableOutcomes);
+            Assert.Equal(0, item.PolicyExpectations.ExpectedBlockedRecommendationEscapeCount);
+        }
+
+        foreach (var item in suite.Cases.Take(4))
+        {
+            Assert.Equal(
+                [typeof(OutboundContextGuard).FullName!],
+                item.RepositoryExpectations.RequiredEntities);
+        }
+
+        var bounded = suite.Cases.Single(item => item.Id == "live-security-bounded-context-control");
+        Assert.Equal(
+            [typeof(InitiativeContextBuilder).FullName!],
+            bounded.RepositoryExpectations.RequiredEntities);
+        Assert.DoesNotContain(typeof(OutboundContextGuard).FullName!, bounded.RepositoryExpectations.RequiredEntities);
+        Assert.Contains(typeof(OutboundContextGuard).FullName!, bounded.RepositoryExpectations.AcceptableEntities);
+
+        var rawSnapshot = suite.Cases.Single(item => item.Id == "live-security-raw-snapshot-upload");
+        Assert.DoesNotContain(rawSnapshot.PolicyExpectations.Activations,
+            activation => activation.PolicyId == SystemPolicyCatalog.RemoteCompleteRepositoryId);
+    }
+
+    [Fact]
+    public async Task SecurityRetrievalSuite_FakeRunIsOfflineAndLeakFree()
+    {
+        var suitePath = FindRepositoryFile("evaluations", "security-retrieval-live-suite.json");
+        var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(suitePath);
+        using var fixture = await Fixture.CreateAsync();
+        var service = new LiveEvaluationService(
+            store: new LocalLiveEvaluationStore(Path.Combine(fixture.Root, "security-data")),
+            clock: () => new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero));
+
+        var result = await service.RunAsync(
+            LiveEvaluationPlanner.Create(suite),
+            suitePath,
+            fixture.Memory,
+            "Fake",
+            FakeFactory(fixture),
+            "model-a",
+            "model-b",
+            "low",
+            "medium");
+
+        Assert.Equal(5, result.Aggregate.CasesSucceeded);
+        Assert.Equal(0, result.Aggregate.CasesFailed);
+        Assert.Equal(10, result.Aggregate.Usage.LogicalCalls);
+        Assert.Equal(0, result.Aggregate.SourceBodyOutbound);
+        Assert.Equal(0, result.Aggregate.SecretOutbound);
+        Assert.Equal(0, result.Aggregate.AbsolutePathOutbound);
+        Assert.Equal(0, result.Aggregate.RawSnapshotOutbound);
+        Assert.Equal(0, result.Aggregate.BlockedRecommendationEscapeCount);
+    }
+
+    [Fact]
     public async Task SecurityFixture_SeparatesInitiativeRepositoryAnalysisAndPolicyExpectations()
     {
         var suite = await new LiveEvaluationSuiteSerializer().LoadAsync(FindRepositoryFile("evaluations", "live-suite.json"));
