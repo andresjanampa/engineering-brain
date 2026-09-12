@@ -24,11 +24,39 @@ public sealed class LiveEvaluationSuiteSerializer
         var root = Path.GetDirectoryName(Path.GetFullPath(path))!;
         foreach (var item in suite.Cases)
         {
+            ValidateAlternatives(
+                item.Id,
+                "capability",
+                item.UnderstandingExpectations.CapabilityAlternatives,
+                item.UnderstandingExpectations.RequiredCapabilities
+                    .Concat(item.UnderstandingExpectations.AcceptableCapabilities));
+            ValidateAlternatives(
+                item.Id,
+                "unknown topic",
+                item.UnderstandingExpectations.UnknownTopicAlternatives,
+                item.UnderstandingExpectations.ExpectedUnknownTopics);
             var initiativePath = ResolveWithin(root, item.InitiativePath);
             if (!File.Exists(initiativePath))
                 throw new InvalidDataException($"Live evaluation initiative does not exist: {item.InitiativePath}");
         }
         return suite;
+    }
+
+    private static void ValidateAlternatives(
+        string caseId,
+        string kind,
+        IReadOnlyList<LiveLexicalExpectationAlternatives> alternatives,
+        IEnumerable<string> expectedIds)
+    {
+        var ids = expectedIds.ToHashSet(StringComparer.Ordinal);
+        var invalid = alternatives.Any(value => string.IsNullOrWhiteSpace(value.Id)
+            || !ids.Contains(value.Id)
+            || value.Alternatives.Count == 0
+            || value.Alternatives.Any(alternative => alternative.Count == 0
+                || alternative.Any(string.IsNullOrWhiteSpace)))
+            || alternatives.Select(value => value.Id).Distinct(StringComparer.Ordinal).Count() != alternatives.Count;
+        if (invalid)
+            throw new InvalidDataException($"Live evaluation case '{caseId}' has invalid {kind} alternatives.");
     }
 
     public static string ResolveWithin(string root, string relativePath)

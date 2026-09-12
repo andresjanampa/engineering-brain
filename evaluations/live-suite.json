@@ -136,7 +136,43 @@
       "understandingExpectations": {
         "requiredCapabilities": ["repository collection", "remote transmission", "LLM provider integration"],
         "acceptableCapabilities": ["repository packaging", "large payload handling"],
-        "expectedUnknownTopics": ["provider API", "authorization or consent", "complete repository", "sensitive", "retain", "large", "precision"]
+        "expectedUnknownTopics": ["provider API", "authorization or consent", "repository scope", "secret or sensitive-data handling", "retention or deletion", "repository or payload size limits", "precision success criteria"],
+        "capabilityAlternatives": [
+          {
+            "id": "remote transmission",
+            "alternatives": [["remote", "transmission"], ["repository", "transmission"], ["repository", "upload"]]
+          }
+        ],
+        "unknownTopicAlternatives": [
+          {
+            "id": "provider API",
+            "alternatives": [["provider", "api"], ["provider"], ["endpoint"]]
+          },
+          {
+            "id": "authorization or consent",
+            "alternatives": [["authorization"], ["consent"], ["permission"]]
+          },
+          {
+            "id": "repository scope",
+            "alternatives": [["repository", "scope"], ["complete", "repository"], ["files", "included"], ["files", "excluded"], ["directories", "included"], ["directories", "excluded"]]
+          },
+          {
+            "id": "secret or sensitive-data handling",
+            "alternatives": [["secret"], ["credentials"], ["sensitive", "data"], ["redacted"]]
+          },
+          {
+            "id": "retention or deletion",
+            "alternatives": [["retention"], ["deletion"], ["retain"]]
+          },
+          {
+            "id": "repository or payload size limits",
+            "alternatives": [["repository", "size"], ["payload", "limits"], ["upload", "limits"], ["large", "repository"], ["large", "repositories"]]
+          },
+          {
+            "id": "precision success criteria",
+            "alternatives": [["precision", "evaluated"], ["precision", "measured"], ["precision", "success"], ["precision", "improvement"]]
+          }
+        ]
       },
       "repositoryExpectations": {
         "requiredEntities": ["EngineeringBrain.Infrastructure.OutboundContextGuard"],
