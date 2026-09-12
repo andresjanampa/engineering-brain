@@ -29,8 +29,38 @@ public sealed class LiveEvaluationTests
 
         Assert.DoesNotContain("OutboundContextGuard", call1Expectations, StringComparison.Ordinal);
         Assert.DoesNotContain("InitiativeContextBuilder", call1Expectations, StringComparison.Ordinal);
-        Assert.Contains("EngineeringBrain.Infrastructure.OutboundContextGuard", item.RepositoryExpectations.RequiredEntities);
+        Assert.Equal(
+            ["EngineeringBrain.Infrastructure.OpenAIReasoningProvider"],
+            item.RepositoryExpectations.RequiredEntities);
+        Assert.DoesNotContain("EngineeringBrain.Infrastructure.OutboundContextGuard", item.RepositoryExpectations.RequiredEntities);
+        Assert.Contains("EngineeringBrain.Infrastructure.OutboundContextGuard", item.RepositoryExpectations.AcceptableEntities);
         Assert.Contains("EngineeringBrain.Infrastructure.InitiativeContextBuilder", item.RepositoryExpectations.AcceptableEntities);
+        Assert.Contains("EngineeringBrain.Core.IReasoningProvider", item.RepositoryExpectations.AcceptableEntities);
+        Assert.Contains("EngineeringBrain.Infrastructure", item.RepositoryExpectations.RequiredProjects);
+        Assert.Equal(
+            ["repository collection", "remote transmission", "LLM provider integration"],
+            item.UnderstandingExpectations.RequiredCapabilities);
+        Assert.Equal(
+            ["repository packaging", "large payload handling"],
+            item.UnderstandingExpectations.AcceptableCapabilities);
+        Assert.Equal(
+            ["provider API", "authorization or consent", "repository scope", "secret or sensitive-data handling", "retention or deletion", "repository or payload size limits", "precision success criteria"],
+            item.UnderstandingExpectations.ExpectedUnknownTopics);
+        Assert.Equal(
+            [["remote", "transmission"], ["repository", "transmission"], ["repository", "upload"]],
+            Assert.Single(item.UnderstandingExpectations.CapabilityAlternatives).Alternatives);
+        Assert.Equal(
+            [
+                "provider API:provider+api|provider|endpoint",
+                "authorization or consent:authorization|consent|permission",
+                "repository scope:repository+scope|complete+repository|files+included|files+excluded|directories+included|directories+excluded",
+                "secret or sensitive-data handling:secret|credentials|sensitive+data|redacted",
+                "retention or deletion:retention|deletion|retain",
+                "repository or payload size limits:repository+size|payload+limits|upload+limits|large+repository|large+repositories",
+                "precision success criteria:precision+evaluated|precision+measured|precision+success|precision+improvement"
+            ],
+            item.UnderstandingExpectations.UnknownTopicAlternatives.Select(value =>
+                $"{value.Id}:{string.Join('|', value.Alternatives.Select(alternative => string.Join('+', alternative)))}"));
         Assert.Contains(InitiativeAnalysisStatus.NeedsClarification, item.AnalysisExpectations.AcceptableStatuses);
         var activation = Assert.Single(item.PolicyExpectations.Activations);
         Assert.Equal(SystemPolicyCatalog.RemoteCompleteRepositoryId, activation.PolicyId);
