@@ -1,4 +1,5 @@
 using EngineeringBrain.Core;
+using EngineeringBrain.Infrastructure;
 
 namespace EngineeringBrain.Core.Tests;
 
@@ -6,18 +7,19 @@ internal static class ReviewedConceptTestData
 {
     public static ReviewedConceptCatalog Catalog(bool reversed = false)
     {
+        var evidence = Evidence();
         var declarations = new[]
         {
-            Declaration("provider-boundary", "entity:business-service"),
-            Declaration("initiative-analysis-persistence", "entity:model")
+            WithFingerprint(Declaration("provider-boundary", "entity:business-service")),
+            WithFingerprint(Declaration("initiative-analysis-persistence", "entity:model"))
         };
         return new ReviewedConceptCatalog(
             1,
-            "repository:test",
-            "feature/project-memory",
-            "feature-project-memory--branch",
-            3,
-            "test-analyzer-v3",
+            evidence.RepositoryId,
+            evidence.Branch,
+            evidence.BranchKey,
+            evidence.SourceSnapshotSchema,
+            evidence.SourceAnalyzerVersion,
             "v2",
             reversed ? declarations.Reverse().ToArray() : declarations);
     }
@@ -41,8 +43,21 @@ internal static class ReviewedConceptTestData
 
     public static ReviewedConceptAssignment Assignment(string entityId) => new(
         entityId,
-        entityId == "entity:model" ? "src/Core/Model.cs:1" : "src/Business/BusinessService.cs:1",
-        $"fingerprint-{entityId}");
+        $"{Evidence().Components[entityId].RelativePath}:{Evidence().Components[entityId].StartLine}",
+        Evidence().Components[entityId].SourceFingerprint);
+
+    public static ReviewedConceptDeclaration WithFingerprint(ReviewedConceptDeclaration declaration) =>
+        declaration with
+        {
+            Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(declaration)
+        };
+
+    public static ReviewedConceptEvidenceContext Evidence()
+    {
+        var snapshot = ProjectMemoryTestFactory.Create();
+        var build = new ProjectMemoryBuilder().Build(snapshot);
+        return ReviewedConceptEvidenceContext.FromMemory(Memory(snapshot, build.Manifest));
+    }
 
     public static ProjectMemorySyncResult Memory(
         RepositorySnapshot snapshot,
