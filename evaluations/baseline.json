@@ -1,0 +1,103 @@
+{
+  "evaluationSchemaVersion": 1,
+  "suiteId": "engineering-brain-initial-v1",
+  "analyzerVersion": "csharp-project-aware-v3",
+  "retrievalVersion": "lexical-graph-v1",
+  "caseCount": 10,
+  "aggregate": {
+    "cases": 10,
+    "passed": 10,
+    "recallAt5": 0.7777777777777778,
+    "recallAt10": 1,
+    "precisionAt5": 0.3111111111111111,
+    "precisionAt10": 0.18888888888888888,
+    "meanReciprocalRank": 0.5138888888888888,
+    "projectRecallAt3": 1,
+    "projectMeanReciprocalRank": 0.9444444444444444,
+    "nonTestCaseTestCandidateRatioAt10": 0.32469135802469135,
+    "testRelevantCaseTestCandidateRatioAt10": 1,
+    "averageCandidateCount": 188,
+    "averageSelectedComponents": 12.1,
+    "averageCall2Tokens": 14001.3,
+    "medianCall2Tokens": 14159.5,
+    "maximumCall2Tokens": 15891,
+    "budgetViolations": 0,
+    "evidenceValidationRate": 1,
+    "invalidEvidenceCount": 0,
+    "fabricatedEntitiesAccepted": 0,
+    "needsClarificationExpected": 1,
+    "needsClarificationActual": 1
+  },
+  "cases": [
+    {
+      "id": "python-analyzer",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.5,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 14453
+    },
+    {
+      "id": "background-memory-audit",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 14243
+    },
+    {
+      "id": "web-code-graph",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.125,
+      "projectMeanReciprocalRank": 0.5,
+      "estimatedCall2Tokens": 15357
+    },
+    {
+      "id": "ambiguous-notifications",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 11717
+    },
+    {
+      "id": "security-repository-upload",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.16666666666666666,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 15891
+    },
+    {
+      "id": "exact-csharp-analyzer",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.5,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 13970
+    },
+    {
+      "id": "cli-command",
+      "recallAt10": 1,
+      "meanReciprocalRank": 1,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 15257
+    },
+    {
+      "id": "spanish-language-analyzer",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.5,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 13414
+    },
+    {
+      "id": "semantic-integration-tests",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.3333333333333333,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 11635
+    },
+    {
+      "id": "other-language-test-noise",
+      "recallAt10": 1,
+      "meanReciprocalRank": 0.5,
+      "projectMeanReciprocalRank": 1,
+      "estimatedCall2Tokens": 14076
+    }
+  ]
+}

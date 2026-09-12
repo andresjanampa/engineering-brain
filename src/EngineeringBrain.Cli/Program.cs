@@ -23,6 +23,10 @@ internal static class BrainCli
         {
             return await RunAnalyzeAsync(args);
         }
+        if (args[0].Equals("eval", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunEvaluationAsync(args);
+        }
 
         var maximumArguments = isMemorySync ? 3 : 2;
         if ((!isScan && !isMemorySync) || args.Length > maximumArguments)
@@ -95,19 +99,32 @@ internal static class BrainCli
             }
 
             var initiative = await File.ReadAllTextAsync(options.InitiativePath, cancellation.Token);
+            var scan = await AnalyzeRepositoryAsync(options.RepositoryPath, cancellation.Token);
+            var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            var providerOptions = OpenAIReasoningProviderOptions.FromEnvironment() with
+            {
+                InterpretationReasoningEffort = options.InterpretationEffort,
+                AnalysisReasoningEffort = options.AnalysisEffort
+            };
+            var interpretationEffort = providerOptions.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
+            var analysisEffort = providerOptions.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
+            var preview = await new RemoteContextPreviewService().CreateAsync(
+                options.InitiativePath, initiative, memory, options.InterpretationModel, options.ReasoningModel,
+                interpretationEffort, analysisEffort, cancellation.Token);
+            WritePreview(preview);
+            if (options.Preview)
+            {
+                return preview.WithinBudget && preview.Security.IsValid ? 0 : 3;
+            }
+
             var apiKey = RemoteReasoningAuthorization.RequireOpenAIApiKey(options.AllowRemote);
+            Console.WriteLine();
             Console.WriteLine("Remote reasoning: explicitly authorized");
             Console.WriteLine("Call 1 sends only the initiative text. Call 2 sends selected Project Memory and evidence metadata.");
             Console.WriteLine("Source bodies, repository files, environment files, credentials, and the full snapshot are not sent.");
-
-            IRepositoryScanner scanner = new RepositoryScanner();
-            var git = new GitInfoProvider();
-            IReadOnlyList<ILanguageAnalyzer> analyzers = [new CSharpAnalyzer()];
-            IRepositorySnapshotStore snapshotStore = new LocalRepositorySnapshotStore();
-            var engine = new RepositoryAnalysisEngine(scanner, git, analyzers, snapshotStore, git);
-            var scan = await engine.ScanAsync(options.RepositoryPath, cancellation.Token);
-            var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
-            IReasoningProvider provider = new OpenAIReasoningProvider(apiKey);
+            IReasoningProvider provider = new OpenAIReasoningProvider(
+                apiKey,
+                providerOptions);
             var service = new InitiativeAnalysisService(provider);
             var result = await service.AnalyzeAsync(
                 new InitiativeAnalysisRequest(
@@ -163,16 +180,23 @@ internal static class BrainCli
         var initiativePath = Path.GetFullPath(args[1]);
         var repositoryPath = Environment.CurrentDirectory;
         var allowRemote = false;
+        var preview = false;
         var interpretationModel = Environment.GetEnvironmentVariable("ENGINEERING_BRAIN_INTERPRETATION_MODEL")
             ?? "gpt-5.6-luna";
         var reasoningModel = Environment.GetEnvironmentVariable("ENGINEERING_BRAIN_REASONING_MODEL")
             ?? "gpt-5.6-sol";
+        var defaults = OpenAIReasoningProviderOptions.FromEnvironment();
+        var interpretationEffort = defaults.InterpretationReasoningEffort;
+        var analysisEffort = defaults.AnalysisReasoningEffort;
         for (var index = 2; index < args.Length; index++)
         {
             switch (args[index])
             {
                 case "--allow-remote":
                     allowRemote = true;
+                    break;
+                case "--preview":
+                    preview = true;
                     break;
                 case "--repo" when index + 1 < args.Length:
                     repositoryPath = Path.GetFullPath(args[++index]);
@@ -182,6 +206,12 @@ internal static class BrainCli
                     break;
                 case "--reasoning-model" when index + 1 < args.Length:
                     reasoningModel = args[++index];
+                    break;
+                case "--interpretation-effort" when index + 1 < args.Length:
+                    interpretationEffort = args[++index];
+                    break;
+                case "--analysis-effort" when index + 1 < args.Length:
+                    analysisEffort = args[++index];
                     break;
                 default:
                     error = $"Unknown or incomplete analyze option: {args[index]}";
@@ -199,9 +229,188 @@ internal static class BrainCli
             initiativePath,
             repositoryPath,
             allowRemote,
+            preview,
             interpretationModel,
-            reasoningModel);
+            reasoningModel,
+            interpretationEffort,
+            analysisEffort);
         return true;
+    }
+
+    private static async Task<int> RunEvaluationAsync(string[] args)
+    {
+        var updateBaseline = args.Contains("--update-baseline", StringComparer.OrdinalIgnoreCase);
+        var positional = args.Skip(1).Where(value => !value.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        if (positional.Length > 1 || args.Skip(1).Any(value => value.StartsWith("--", StringComparison.Ordinal)
+            && !value.Equals("--update-baseline", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.Error.WriteLine("Usage: brain eval [repository-or-suite-path] [--update-baseline]");
+            return 2;
+        }
+
+        using var cancellation = CreateCancellationSource();
+        try
+        {
+            var input = Path.GetFullPath(positional.SingleOrDefault() ?? Environment.CurrentDirectory);
+            var suitePath = File.Exists(input) ? input : Path.Combine(input, "evaluations", "suite.json");
+            var repositoryPath = File.Exists(input)
+                ? new RepositoryRootLocator().Locate(Path.GetDirectoryName(input)!)
+                : input;
+            var serializer = new EvaluationSuiteSerializer();
+            var suite = await serializer.LoadAsync(suitePath, cancellation.Token);
+            var scan = await AnalyzeRepositoryAsync(repositoryPath, cancellation.Token);
+            var memory = await new ProjectMemoryService().SyncAsync(scan.Snapshot, cancellation.Token);
+            var harness = new EvaluationHarness();
+            var cases = await harness.EvaluateAsync(suite, suitePath, memory, cancellation.Token);
+            var aggregate = EvaluationHarness.Aggregate(cases);
+            var baselinePath = Path.Combine(Path.GetDirectoryName(suitePath)!, "baseline.json");
+            var baseline = await EvaluationResultStore.LoadBaselineAsync(baselinePath, cancellation.Token);
+            if (baseline is not null && (baseline.EvaluationSchemaVersion != suite.EvaluationSchemaVersion
+                || !baseline.SuiteId.Equals(suite.Id, StringComparison.Ordinal)
+                || baseline.CaseCount != suite.Cases.Count))
+            {
+                throw new InvalidDataException("Evaluation baseline is incompatible with the current suite schema, identity, or case count.");
+            }
+            var regressions = baseline is null || updateBaseline
+                ? []
+                : new EvaluationBaselineComparer().Compare(baseline, aggregate, currentCases: cases);
+            var result = new EvaluationRunResult(
+                suite.EvaluationSchemaVersion, suite.Id, scan.Snapshot.Repository.Id,
+                scan.Snapshot.Git.Branch ?? "(no branch)", scan.Snapshot.Analysis.AnalyzerVersion,
+                EvaluationHarness.RetrievalVersion, DateTimeOffset.UtcNow, aggregate,
+                EvaluationHarness.Categories(cases), cases, regressions,
+                updateBaseline ? "Updated explicitly" : baseline is null ? "Missing" : "Compared",
+                string.Empty);
+            if (updateBaseline)
+            {
+                var created = new EvaluationBaseline(result.EvaluationSchemaVersion, result.SuiteId,
+                    result.AnalyzerVersion, result.RetrievalVersion, cases.Count, aggregate,
+                    cases.Select(item => new EvaluationBaselineCase(item.Id, item.Retrieval.RecallAt10,
+                        item.Retrieval.MeanReciprocalRank, item.Retrieval.ProjectMeanReciprocalRank,
+                        item.Context.EstimatedCall2Tokens)).ToArray());
+                await EvaluationResultStore.SaveBaselineAsync(baselinePath, created, cancellation.Token);
+            }
+            var resultStore = new EvaluationResultStore();
+            var resultPath = await resultStore.SaveResultAsync(result, cancellation.Token);
+            result = result with { ResultPath = resultPath };
+            WriteEvaluation(result, baselinePath);
+            return result.Regressions.Count == 0 && aggregate.Passed == aggregate.Cases
+                && aggregate.FabricatedEntitiesAccepted == 0 && aggregate.BudgetViolations == 0 ? 0 : 3;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Command cancelled.");
+            return 130;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or ArgumentException or InvalidOperationException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            Console.Error.WriteLine($"Evaluation failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<RepositoryAnalysisResult> AnalyzeRepositoryAsync(string path, CancellationToken cancellationToken)
+    {
+        IRepositoryScanner scanner = new RepositoryScanner();
+        var git = new GitInfoProvider();
+        IReadOnlyList<ILanguageAnalyzer> analyzers = [new CSharpAnalyzer()];
+        IRepositorySnapshotStore snapshotStore = new LocalRepositorySnapshotStore();
+        return await new RepositoryAnalysisEngine(scanner, git, analyzers, snapshotStore, git)
+            .ScanAsync(path, cancellationToken);
+    }
+
+    private static void WritePreview(RemoteContextPreview preview)
+    {
+        Console.WriteLine("Engineering Brain");
+        WriteSection("Remote Context Preview");
+        Console.WriteLine($"Initiative file: {preview.InitiativeFileName}");
+        Console.WriteLine($"Characters: {preview.Call1.CharacterCount}");
+        Console.WriteLine($"Interpretation source: {preview.Call1.InterpretationSource}");
+
+        WriteSection("CALL #1");
+        Console.WriteLine("Would send: initiative text and structural instructions");
+        Console.WriteLine("Would NOT send: repository, Project Memory, source, or snapshot");
+        Console.WriteLine($"Model: {preview.InterpretationModel}");
+        Console.WriteLine($"Reasoning effort: {preview.InterpretationReasoningEffort}");
+        Console.WriteLine($"Estimated input tokens: {preview.Call1.EstimatedTokens}");
+
+        WriteSection("CALL #2");
+        Console.WriteLine($"Model: {preview.ReasoningModel}");
+        Console.WriteLine($"Reasoning effort: {preview.AnalysisReasoningEffort}");
+        Console.WriteLine($"Projects selected: {preview.Call2.SelectedProjectIds.Count}");
+        Console.WriteLine($"Components selected: {preview.Call2.SelectedEntityIds.Count}");
+        Console.WriteLine($"Relations selected: {preview.Call2.SelectedRelations}");
+        Console.WriteLine($"Project notes: {preview.Call2.ProjectNotes}");
+        Console.WriteLine($"Component notes: {preview.Call2.ComponentNotes}");
+        Console.WriteLine($"Estimated input tokens: {preview.Call2.EstimatedTokens}");
+
+        WriteSection("Security");
+        Console.WriteLine($"Source bodies: {preview.Security.SourceBodyFindings}");
+        Console.WriteLine($"Absolute paths: {preview.Security.AbsolutePathFindings}");
+        Console.WriteLine($"Secrets detected: {preview.Security.SecretFindings}");
+        Console.WriteLine($"Full snapshot embedded: {(preview.Security.RawSnapshotFindings == 0 ? "NO" : "YES")}");
+
+        WriteSection("Budget");
+        Console.WriteLine($"Estimated CALL #2: {preview.Call2.EstimatedTokens}");
+        Console.WriteLine($"Hard limit: {preview.HardTokenLimit}");
+        Console.WriteLine($"Utilization: {preview.Call2.EstimatedTokens * 100d / preview.HardTokenLimit:F1}%");
+        Console.WriteLine($"Status: {(preview.WithinBudget ? "within budget" : "exceeded")}");
+        Console.WriteLine($"Manifest: {preview.ManifestPath}");
+    }
+
+    private static void WriteEvaluation(EvaluationRunResult result, string baselinePath)
+    {
+        Console.WriteLine("Engineering Brain Evaluation");
+        WriteSection("Suite");
+        Console.WriteLine($"Cases: {result.Aggregate.Cases}");
+        Console.WriteLine($"Passed: {result.Aggregate.Passed}");
+        Console.WriteLine($"Regressions: {result.Regressions.Count}");
+        Console.WriteLine($"Baseline: {result.BaselineStatus} ({baselinePath})");
+        WriteSection("Retrieval");
+        Console.WriteLine($"Recall@5: {result.Aggregate.RecallAt5:F3}");
+        Console.WriteLine($"Recall@10: {result.Aggregate.RecallAt10:F3}");
+        Console.WriteLine($"Precision@5: {result.Aggregate.PrecisionAt5:F3}");
+        Console.WriteLine($"Precision@10: {result.Aggregate.PrecisionAt10:F3}");
+        Console.WriteLine($"MRR: {result.Aggregate.MeanReciprocalRank:F3}");
+        Console.WriteLine($"Average candidates: {result.Aggregate.AverageCandidateCount:F1}");
+        Console.WriteLine($"Average selected components: {result.Aggregate.AverageSelectedComponents:F1}");
+        WriteSection("Projects");
+        Console.WriteLine($"Recall@3: {result.Aggregate.ProjectRecallAt3:F3}");
+        Console.WriteLine($"MRR: {result.Aggregate.ProjectMeanReciprocalRank:F3}");
+        WriteSection("Evidence And Test Noise");
+        Console.WriteLine($"Evidence validation rate: {result.Aggregate.EvidenceValidationRate:F3}");
+        Console.WriteLine($"Invalid evidence: {result.Aggregate.InvalidEvidenceCount}");
+        Console.WriteLine($"Fabricated entity accepted: {result.Aggregate.FabricatedEntitiesAccepted}");
+        Console.WriteLine($"Non-test TestCandidateRatio@10: {result.Aggregate.NonTestCaseTestCandidateRatioAt10:F3}");
+        Console.WriteLine($"Test-relevant TestCandidateRatio@10: {result.Aggregate.TestRelevantCaseTestCandidateRatioAt10:F3}");
+        Console.WriteLine($"NeedsClarification expected/actual: {result.Aggregate.NeedsClarificationExpected}/{result.Aggregate.NeedsClarificationActual}");
+        WriteSection("Context");
+        Console.WriteLine($"CALL #2 tokens average: {result.Aggregate.AverageCall2Tokens:F1}");
+        Console.WriteLine($"CALL #2 tokens median: {result.Aggregate.MedianCall2Tokens:F1}");
+        Console.WriteLine($"CALL #2 tokens max: {result.Aggregate.MaximumCall2Tokens}");
+        Console.WriteLine($"Budget violations: {result.Aggregate.BudgetViolations}");
+        WriteSection("Per Category");
+        foreach (var category in result.Categories)
+            Console.WriteLine($"{category.Category}: cases={category.Cases}; entity cases={category.EntityRetrievalCases}; "
+                + $"Recall@10={(category.EntityRetrievalCases == 0 ? "n/a" : category.RecallAt10.ToString("F3"))}; "
+                + $"MRR={(category.EntityRetrievalCases == 0 ? "n/a" : category.MeanReciprocalRank.ToString("F3"))}; "
+                + $"project MRR={(category.ProjectRetrievalCases == 0 ? "n/a" : category.ProjectMeanReciprocalRank.ToString("F3"))}");
+        var failed = result.Cases.Where(item => !item.Passed).ToArray();
+        if (failed.Length > 0)
+        {
+            WriteSection("Failed Cases");
+            foreach (var item in failed)
+                Console.WriteLine($"{item.Id}: {string.Join("; ", item.Diagnostics)}");
+        }
+        if (result.Regressions.Count > 0)
+        {
+            WriteSection("Regressions");
+            foreach (var item in result.Regressions)
+                Console.WriteLine($"{item.Metric}: {item.Baseline:F3} -> {item.Current:F3}. {item.Reason}");
+        }
+        WriteSection("Result");
+        Console.WriteLine(result.ResultPath);
     }
 
     private static void WriteAnalysis(InitiativeAnalysisResult result)
@@ -260,7 +469,8 @@ internal static class BrainCli
             Console.WriteLine(
                 $"{call.Stage}: provider={call.Provider}; model={call.Model}; estimated input={call.EstimatedInputTokens}; "
                 + $"actual input={FormatUsage(call.ActualInputTokens)}; cached={FormatUsage(call.CachedInputTokens)}; "
-                + $"output={FormatUsage(call.ActualOutputTokens)}; duration={call.DurationMilliseconds} ms; retries={call.Retries}");
+                + $"output={FormatUsage(call.ActualOutputTokens)}; duration={call.DurationMilliseconds} ms; retries={call.Retries}; "
+                + $"reasoning effort={call.ReasoningEffort ?? "n/a"}");
         }
 
         WriteSection("Analysis Record");
@@ -479,8 +689,10 @@ internal static class BrainCli
         Console.WriteLine();
         Console.WriteLine("Usage: brain scan [path]");
         Console.WriteLine("       brain memory sync [path]");
-        Console.WriteLine("       brain analyze <initiative.md> [--repo <path>] --allow-remote");
+        Console.WriteLine("       brain eval [repository-or-suite-path] [--update-baseline]");
+        Console.WriteLine("       brain analyze <initiative.md> [--repo <path>] [--preview | --allow-remote]");
         Console.WriteLine("           [--interpretation-model <model>] [--reasoning-model <model>]");
+        Console.WriteLine("           [--interpretation-effort <low|medium|high>] [--analysis-effort <low|medium|high>]");
         Console.WriteLine("If path is omitted, the current directory is scanned.");
     }
 
@@ -488,6 +700,9 @@ internal static class BrainCli
         string InitiativePath,
         string RepositoryPath,
         bool AllowRemote,
+        bool Preview,
         string InterpretationModel,
-        string ReasoningModel);
+        string ReasoningModel,
+        string InterpretationEffort,
+        string AnalysisEffort);
 }

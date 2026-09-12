@@ -26,3 +26,6 @@ Keep these rules true as the product evolves:
 - Prefer focused tests for analyzers, especially parsing, semantic resolution, evidence locations, and stable identities.
 - Preserve snapshot and CLI backward compatibility as the product evolves, or document and version intentional breaks.
 - Avoid infrastructure and abstractions until a demonstrated use case needs them.
+- Measure retrieval and context quality before optimizing them; do not tune behavior to individual golden cases.
+- Require explicit review before updating an evaluation baseline. A normal evaluation must never auto-accept its results.
+- Keep outbound remote context previewable and auditable without network access.

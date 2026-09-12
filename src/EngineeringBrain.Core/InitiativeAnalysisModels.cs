@@ -44,6 +44,19 @@ public enum EvidenceValidationStatus
     Proposal
 }
 
+public enum ContextSegmentKind
+{
+    InitiativeUnderstanding,
+    RepositoryIdentity,
+    RootIndex,
+    ArchitectureOverview,
+    ProjectNote,
+    ComponentNote,
+    GraphEvidence,
+    SourceBody,
+    RawSnapshot
+}
+
 public sealed record InitiativeUnderstanding(
     string Summary,
     IReadOnlyList<string> Actors,
@@ -144,18 +157,25 @@ public sealed record ReasoningCallUsage(
     int? CachedInputTokens,
     int? ActualOutputTokens,
     long DurationMilliseconds,
-    int Retries);
+    int Retries,
+    string? ReasoningEffort = null);
 
 public sealed record ReasoningResult<T>(T Value, ReasoningCallUsage Usage);
 
-public sealed record ContextSection(string Name, string Content, int EstimatedTokens);
+public sealed record ContextSegment(
+    ContextSegmentKind Kind,
+    string Content,
+    int EstimatedTokens,
+    string? SourceIdentity,
+    int Rank,
+    bool Mandatory);
 
 public sealed record InitiativeContext(
     string Content,
     int EstimatedTokens,
     IReadOnlyList<string> IncludedNotePaths,
     IReadOnlyList<string> PrunedNotePaths,
-    IReadOnlyList<ContextSection> Sections);
+    IReadOnlyList<ContextSegment> Segments);
 
 public sealed record ValidatedRecommendation(
     AnalysisRecommendation Recommendation,

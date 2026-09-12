@@ -4,7 +4,7 @@ Engineering Brain is a local-first engineering intelligence platform. Its goal i
 
 ## Current status
 
-This repository contains the project-aware, incremental foundation, deterministic Project Memory, and the first evidence-validated initiative-analysis workflow. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
+This repository contains the project-aware, incremental foundation, deterministic Project Memory, the first evidence-validated initiative-analysis workflow, and an offline evaluation harness. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
 
 - repository and current Git metadata;
 - discovered files, sizes, and content hashes where safe and reasonable;
@@ -37,6 +37,8 @@ Generated snapshots contain derived metadata, never source file contents. By def
 Project Memory is a navigable projection, not a source of truth. The snapshot and code graph always take precedence.
 
 `brain analyze` adds two bounded reasoning stages. The first converts an initiative into structured requirements. Deterministic retrieval then ranks exhaustive snapshot entities and graph relations, builds a compact context from selected Project Memory, and asks a second model for structured architecture recommendations. Every recommendation is subsequently validated against the current repository and branch evidence; invented identities and relations remain explicitly invalid.
+
+`brain eval` benchmarks deterministic retrieval, context selection, token budgets, and the evidence contract against a versioned, non-sensitive golden corpus. It is offline and reuses one validated snapshot and Project Memory sync for the whole suite.
 
 ## Requirements
 
@@ -86,6 +88,14 @@ The first sync initializes `manifest.json`, a root index, an architecture overvi
 
 ## Analyze an initiative
 
+Inspect the planned outbound metadata without an API key, authorization, or network call:
+
+```powershell
+dotnet run --project src/EngineeringBrain.Cli -- analyze evaluations/cases/python-analyzer/initiative.md --repo . --preview
+```
+
+Preview uses a clearly labeled deterministic interpretation. It prints counts, token estimates, security findings, selected candidate totals, and the external manifest path; initiative and context text are not printed or persisted in the manifest.
+
 Set the provider credential in the process environment, then explicitly authorize remote reasoning:
 
 ```powershell
@@ -101,12 +111,34 @@ brain analyze initiative.md --repo . --allow-remote
 
 `--repo` defaults to the current directory. Models can be changed independently with `--interpretation-model` and `--reasoning-model`, or through `ENGINEERING_BRAIN_INTERPRETATION_MODEL` and `ENGINEERING_BRAIN_REASONING_MODEL`. Defaults are `gpt-5.6-luna` and `gpt-5.6-sol`.
 
+Reasoning effort defaults to `low` for interpretation and `medium` for architecture analysis. Configure it with `--interpretation-effort` / `--analysis-effort`, or `ENGINEERING_BRAIN_INTERPRETATION_REASONING_EFFORT` / `ENGINEERING_BRAIN_ANALYSIS_REASONING_EFFORT`. Supported values are `low`, `medium`, and `high`; usage reports record the selected value.
+
 The command first refreshes the snapshot and branch-specific Project Memory. Call 1 sends only the initiative text and structural instructions. Call 2 sends the structured understanding, compact repository/Git facts, selected managed notes, relative evidence paths, identities, and selected graph relations. It does not send repository files, source bodies, the complete snapshot, `.env` or configuration contents, credentials, connection strings, or secrets. Responses API storage is disabled. Structured local analysis records are stored outside the repository under the repository and branch identity; they contain the initiative content hash and filename, not its full text.
 
 `--allow-remote` is mandatory and non-interactive so local and CI behavior is explicit. Merely defining `OPENAI_API_KEY` never makes `scan` or `memory sync` use the network.
+
+The Python-analyzer initiative above is the safe manual live-smoke fixture. A live smoke is never automatic and requires both `OPENAI_API_KEY` and `--allow-remote`; the command prints its validated preview before calling the provider.
+
+## Evaluate retrieval and context
+
+Run the versioned suite offline:
+
+```powershell
+dotnet run --project src/EngineeringBrain.Cli -- eval .
+```
+
+The report includes entity Recall/Precision at 5 and 10, MRR, project Recall@3/MRR, test-candidate noise, category breakdowns, context token distribution, evidence validation, clarification behavior, and regressions. A structured runtime result is written outside the repository under `~/.engineering-brain`; it contains metrics and identities, not prompts or source context.
+
+Create or deliberately accept a new baseline only through:
+
+```powershell
+dotnet run --project src/EngineeringBrain.Cli -- eval . --update-baseline
+```
+
+Normal evaluation never rewrites `evaluations/baseline.json`. Regression thresholds cover critical retrieval decreases, increased test noise, and excessive context growth. Exit code `0` means the golden suite and baseline pass, `3` means an evaluation contract or regression failed, and `1` means execution failed.
 
 ## Not implemented yet
 
 This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, source-body retrieval, embeddings, semantic/vector search, automatic implementation, a UI, or complete impact analysis. Initiative retrieval is lexical and graph-bounded; it finds integration candidates, not guaranteed implementation locations. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
 
-See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
+See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
