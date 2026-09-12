@@ -1,5 +1,11 @@
 namespace EngineeringBrain.Core;
 
+public enum EvaluationSplit
+{
+    Tuning,
+    Holdout
+}
+
 public sealed record EvaluationSuite(
     int EvaluationSchemaVersion,
     string Id,
@@ -11,6 +17,7 @@ public sealed record EvaluationCase(
     string Description,
     string InitiativePath,
     IReadOnlyList<string> Tags,
+    EvaluationSplit Split,
     InitiativeUnderstanding Understanding,
     EvaluationExpectations Expected);
 
@@ -42,6 +49,7 @@ public sealed record RetrievalEvaluationMetrics(
     double ProjectMeanReciprocalRank,
     int TestCandidatesAt5,
     int TestCandidatesAt10,
+    double TestCandidateRatioAt5,
     double TestCandidateRatioAt10,
     bool NegativeCandidateDominates,
     int RequiredEntityCount,
@@ -81,6 +89,7 @@ public sealed record ContextEvaluationMetrics(
 public sealed record EvaluationCaseResult(
     string Id,
     IReadOnlyList<string> Tags,
+    EvaluationSplit Split,
     bool Passed,
     RetrievalEvaluationMetrics Retrieval,
     RecommendationEvaluationMetrics Recommendations,
@@ -101,7 +110,9 @@ public sealed record EvaluationAggregateMetrics(
     double MeanReciprocalRank,
     double ProjectRecallAt3,
     double ProjectMeanReciprocalRank,
+    double NonTestCaseTestCandidateRatioAt5,
     double NonTestCaseTestCandidateRatioAt10,
+    double TestRelevantCaseTestCandidateRatioAt5,
     double TestRelevantCaseTestCandidateRatioAt10,
     double AverageCandidateCount,
     double AverageSelectedComponents,
@@ -125,6 +136,11 @@ public sealed record EvaluationCategoryMetrics(
     double ProjectMeanReciprocalRank,
     double AverageCall2Tokens);
 
+public sealed record EvaluationGroupedMetrics(
+    EvaluationAggregateMetrics Tuning,
+    EvaluationAggregateMetrics Holdout,
+    EvaluationAggregateMetrics All);
+
 public sealed record EvaluationRegression(
     string Metric,
     double Baseline,
@@ -140,6 +156,7 @@ public sealed record EvaluationRunResult(
     string RetrievalVersion,
     DateTimeOffset EvaluatedAtUtc,
     EvaluationAggregateMetrics Aggregate,
+    EvaluationGroupedMetrics Splits,
     IReadOnlyList<EvaluationCategoryMetrics> Categories,
     IReadOnlyList<EvaluationCaseResult> Cases,
     IReadOnlyList<EvaluationRegression> Regressions,
@@ -153,14 +170,16 @@ public sealed record EvaluationBaseline(
     string RetrievalVersion,
     int CaseCount,
     EvaluationAggregateMetrics Aggregate,
-    IReadOnlyList<EvaluationBaselineCase> Cases);
+    IReadOnlyList<EvaluationBaselineCase> Cases,
+    EvaluationGroupedMetrics? Splits = null);
 
 public sealed record EvaluationBaselineCase(
     string Id,
     double RecallAt10,
     double MeanReciprocalRank,
     double ProjectMeanReciprocalRank,
-    int EstimatedCall2Tokens);
+    int EstimatedCall2Tokens,
+    EvaluationSplit Split = EvaluationSplit.Tuning);
 
 public sealed record EvaluationThresholds(
     double CriticalMetricDecrease = 0.10,

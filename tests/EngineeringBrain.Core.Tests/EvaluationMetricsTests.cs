@@ -93,12 +93,67 @@ public sealed class EvaluationMetricsTests
     }
 
     [Fact]
+    public void GroupedMetrics_ReportTuningHoldoutAndAllSeparately()
+    {
+        var tuning = CaseResult("tuning", recallAt10: 1, EvaluationSplit.Tuning);
+        var holdout = CaseResult("holdout", recallAt10: 0, EvaluationSplit.Holdout);
+
+        var grouped = EvaluationHarness.Grouped([tuning, holdout]);
+
+        Assert.Equal(1, grouped.Tuning.Cases);
+        Assert.Equal(1, grouped.Tuning.RecallAt10);
+        Assert.Equal(1, grouped.Holdout.Cases);
+        Assert.Equal(0, grouped.Holdout.RecallAt10);
+        Assert.Equal(2, grouped.All.Cases);
+        Assert.Equal(0.5, grouped.All.RecallAt10);
+    }
+
+    [Fact]
+    public void GroupedBaselineComparison_UsesCasesFromTheCorrectSplit()
+    {
+        var aggregate = Aggregate();
+        var baseline = Baseline(aggregate) with
+        {
+            CaseCount = 2,
+            Cases =
+            [
+                new EvaluationBaselineCase("tuning", 1, 1, 1, 1000, EvaluationSplit.Tuning),
+                new EvaluationBaselineCase("holdout", 1, 1, 1, 1000, EvaluationSplit.Holdout)
+            ],
+            Splits = new(aggregate, aggregate, aggregate)
+        };
+        EvaluationCaseResult[] cases =
+        [
+            CaseResult("tuning", 1, EvaluationSplit.Tuning),
+            CaseResult("holdout", 0, EvaluationSplit.Holdout)
+        ];
+        var current = new EvaluationGroupedMetrics(aggregate, aggregate with { RecallAt10 = 0 }, aggregate);
+
+        var regressions = new EvaluationBaselineComparer().CompareGrouped(baseline, current, cases);
+
+        Assert.Contains(regressions, item => item.Metric == "HOLDOUT Recall@10");
+        Assert.Contains(regressions, item => item.Metric == "HOLDOUT holdout Recall@10");
+        Assert.DoesNotContain(regressions, item => item.Metric.Contains("tuning Recall@10", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GroupedMetrics_AreDeterministicAcrossCaseOrder()
+    {
+        var first = CaseResult("first", 1, EvaluationSplit.Tuning);
+        var second = CaseResult("second", 0, EvaluationSplit.Holdout);
+
+        Assert.Equal(EvaluationHarness.Grouped([first, second]), EvaluationHarness.Grouped([second, first]));
+    }
+
+    [Fact]
     public async Task SuiteLoader_LoadsVersionOneCorpus()
     {
         var path = FindRepositoryFile("evaluations", "suite.json");
         var suite = await new EvaluationSuiteSerializer().LoadAsync(path);
         Assert.Equal(1, suite.EvaluationSchemaVersion);
-        Assert.Equal(10, suite.Cases.Count);
+        Assert.Equal(16, suite.Cases.Count);
+        Assert.Equal(10, suite.Cases.Count(item => item.Split == EvaluationSplit.Tuning));
+        Assert.Equal(6, suite.Cases.Count(item => item.Split == EvaluationSplit.Holdout));
     }
 
     [Fact]
@@ -132,15 +187,50 @@ public sealed class EvaluationMetricsTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task BaselineStore_PreservesHoldoutSplitAndDoesNotRewriteOnLoad()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"brain-baseline-{Guid.NewGuid():N}");
+        var path = Path.Combine(root, "baseline.json");
+        var aggregate = Aggregate();
+        var baseline = Baseline(aggregate) with
+        {
+            Cases = [new EvaluationBaselineCase("holdout", 1, 1, 1, 1000, EvaluationSplit.Holdout)],
+            Splits = new(aggregate, aggregate, aggregate)
+        };
+        try
+        {
+            await EvaluationResultStore.SaveBaselineAsync(path, baseline);
+            var before = await File.ReadAllTextAsync(path);
+
+            var loaded = await EvaluationResultStore.LoadBaselineAsync(path);
+
+            Assert.Equal(EvaluationSplit.Holdout, Assert.Single(loaded!.Cases).Split);
+            Assert.NotNull(loaded.Splits);
+            Assert.Equal(before, await File.ReadAllTextAsync(path));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private static EvaluationAggregateMetrics Aggregate() => new(
-        1, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 0, 0, 10, 5, 1000, 1000, 1000, 0, 1, 0, 0, 0, 0);
+        Cases: 1, Passed: 1, RecallAt5: 1, RecallAt10: 1, PrecisionAt5: 0.5, PrecisionAt10: 0.5,
+        MeanReciprocalRank: 1, ProjectRecallAt3: 1, ProjectMeanReciprocalRank: 1,
+        NonTestCaseTestCandidateRatioAt5: 0, NonTestCaseTestCandidateRatioAt10: 0,
+        TestRelevantCaseTestCandidateRatioAt5: 0, TestRelevantCaseTestCandidateRatioAt10: 0,
+        AverageCandidateCount: 10, AverageSelectedComponents: 5, AverageCall2Tokens: 1000,
+        MedianCall2Tokens: 1000, MaximumCall2Tokens: 1000, BudgetViolations: 0,
+        EvidenceValidationRate: 1, InvalidEvidenceCount: 0, FabricatedEntitiesAccepted: 0,
+        NeedsClarificationExpected: 0, NeedsClarificationActual: 0);
 
     private static EvaluationBaseline Baseline(EvaluationAggregateMetrics aggregate) => new(
         1, "suite", "analyzer", EvaluationHarness.RetrievalVersion, 1, aggregate, []);
 
-    private static EvaluationCaseResult CaseResult(string id, double recallAt10) => new(
-        id, [], true,
-        new RetrievalEvaluationMetrics(1, recallAt10, 1, 1, 1, 1, 1, 0, 0, 0, false, 1, 1),
+    private static EvaluationCaseResult CaseResult(
+        string id,
+        double recallAt10,
+        EvaluationSplit split = EvaluationSplit.Tuning) => new(
+        id, [], split, true,
+        new RetrievalEvaluationMetrics(1, recallAt10, 1, 1, 1, 1, 1, 0, 0, 0, 0, false, 1, 1),
         new RecommendationEvaluationMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, false, false),
         new ContextEvaluationMetrics(1, 1000, 0, 0, 0, 1, 1, 0, 2, false),
         [], [], [], [], []);

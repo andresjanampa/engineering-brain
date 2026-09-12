@@ -87,7 +87,8 @@ public sealed class EvaluationHarnessTests
         try
         {
             await File.WriteAllTextAsync(Path.Combine(suiteRoot, "initiative.md"), term);
-            var item = new EvaluationCase("case", "case", "initiative.md", ["unit"], InitiativeAnalysisTestData.Understanding(term), expected);
+            var item = new EvaluationCase("case", "case", "initiative.md", ["unit"], EvaluationSplit.Tuning,
+                InitiativeAnalysisTestData.Understanding(term), expected);
             var suite = new EvaluationSuite(1, "suite", "suite", [item]);
             return Assert.Single(await new EvaluationHarness().EvaluateAsync(suite, Path.Combine(suiteRoot, "suite.json"), memory));
         }

@@ -21,7 +21,7 @@ public sealed class InitiativeCandidateRetrieverTests
         var result = Retrieve("Business");
 
         Assert.Equal("project:business", result.Projects[0].ProjectId);
-        Assert.Contains(result.Projects[0].MatchReasons, reason => reason.Signal.Contains("project alias", StringComparison.Ordinal));
+        Assert.Contains(result.Projects[0].MatchReasons, reason => reason.Signal == "exact project alias");
     }
 
     [Fact]
@@ -142,6 +142,163 @@ public sealed class InitiativeCandidateRetrieverTests
         Assert.Contains(result.Components, item => item.EntityId == hidden.Id);
     }
 
+    [Fact]
+    public void Retrieve_ExactComponentNameOutranksMemberOnlyMatch()
+    {
+        var snapshot = AddComponent(ProjectMemoryTestFactory.Create(), "entity:member-only", "Worker", "Demo.Core.Worker",
+            "project:core", ["BusinessService"]);
+
+        var result = Retrieve("BusinessService", snapshot);
+
+        Assert.Equal("entity:business-service", result.Components[0].EntityId);
+        Assert.Contains(result.Components[0].MatchReasons, reason => reason.Signal == "exact component name");
+    }
+
+    [Fact]
+    public void Retrieve_ExactFullNameOutranksTokenMatches()
+    {
+        var result = Retrieve("Demo.Business.BusinessService");
+
+        Assert.Equal("entity:business-service", result.Components[0].EntityId);
+        Assert.Contains(result.Components[0].MatchReasons, reason => reason.Signal == "exact full name");
+    }
+
+    [Fact]
+    public void Retrieve_ExactIdentityDoesNotDoubleCountItsNameTokens()
+    {
+        var candidate = Retrieve("BusinessService").Components.Single(item => item.EntityId == "entity:business-service");
+
+        Assert.DoesNotContain(candidate.MatchReasons, reason => reason.Signal == "component name");
+        Assert.DoesNotContain(candidate.MatchReasons, reason => reason.Signal == "component name rarity");
+    }
+
+    [Fact]
+    public void Retrieve_ComponentContributionToProjectIsBounded()
+    {
+        var result = Retrieve("BusinessService");
+        var project = result.Projects.Single(item => item.ProjectId == "project:business");
+
+        Assert.Contains(project.MatchReasons,
+            reason => reason.Signal == "contains selected component" && reason.Points == 12);
+    }
+
+    [Fact]
+    public void Retrieve_OneMeaningfulMemberMatchContributes()
+    {
+        var result = Retrieve("Execute");
+        var candidate = result.Components.Single(item => item.EntityId == "entity:business-service");
+
+        Assert.Contains(candidate.MatchReasons, reason => reason.Signal == "member name" && reason.Points > 0);
+    }
+
+    [Fact]
+    public void Retrieve_RepeatedMemberTokenIsDeduplicatedAndBounded()
+    {
+        var snapshot = AddComponent(ProjectMemoryTestFactory.Create(), "entity:worker", "Worker", "Demo.Core.Worker",
+            "project:core", ["ExecuteFirst", "ExecuteSecond", "ExecuteThird", "ExecuteFourth"]);
+
+        var candidate = Retrieve("execute", snapshot).Components.Single(item => item.EntityId == "entity:worker");
+
+        Assert.Single(candidate.MatchReasons, reason => reason.Signal == "member name" && reason.MatchedValue == "execute");
+        Assert.True(candidate.MatchReasons.Where(reason => reason.Signal == "member name").Sum(reason => reason.Points) <= 6);
+    }
+
+    [Fact]
+    public void Retrieve_DifferentMemberTermsRemainBounded()
+    {
+        var snapshot = AddComponent(ProjectMemoryTestFactory.Create(), "entity:worker", "Worker", "Demo.Core.Worker",
+            "project:core", ["Alpha", "Beta", "Gamma", "Delta"]);
+
+        var candidate = Retrieve("alpha beta gamma delta", snapshot).Components.Single(item => item.EntityId == "entity:worker");
+
+        Assert.Equal(6, candidate.MatchReasons.Where(reason => reason.Signal == "member name").Sum(reason => reason.Points));
+    }
+
+    [Fact]
+    public void Retrieve_ProductionCandidateOutranksEquivalentTestCandidate()
+    {
+        var snapshot = AddProductionTwin(ProjectMemoryTestFactory.Create());
+
+        var result = Retrieve("BusinessService", snapshot);
+
+        Assert.Equal("entity:production-twin", result.Components[0].EntityId);
+        var test = result.Components.Single(item => item.EntityId == "entity:business-service");
+        Assert.Contains(test.MatchReasons, reason => reason.Signal == "non-test initiative penalty" && reason.Points < 0);
+    }
+
+    [Fact]
+    public void Retrieve_TestIntentDisablesPenalty()
+    {
+        var snapshot = MarkBusinessProjectAsTests(ProjectMemoryTestFactory.Create());
+
+        var candidate = Retrieve("integration tests BusinessService", snapshot).Components
+            .Single(item => item.EntityId == "entity:business-service");
+
+        Assert.DoesNotContain(candidate.MatchReasons, reason => reason.Signal == "non-test initiative penalty");
+    }
+
+    [Fact]
+    public void Retrieve_ExplicitTestComponentRemainsSearchableDespitePenalty()
+    {
+        var snapshot = MarkBusinessProjectAsTests(ProjectMemoryTestFactory.Create());
+
+        var result = Retrieve("BusinessService", snapshot);
+
+        Assert.Contains(result.Components, item => item.EntityId == "entity:business-service");
+        Assert.Contains(result.Components.Single(item => item.EntityId == "entity:business-service").MatchReasons,
+            reason => reason.Signal == "exact component name");
+    }
+
+    [Fact]
+    public void Retrieve_WeakTestMatchRemainsEligibleWhenPenaltyMakesScoreNegative()
+    {
+        var snapshot = MarkBusinessProjectAsTests(ProjectMemoryTestFactory.Create());
+
+        var candidate = Retrieve("Execute", snapshot).Components
+            .Single(item => item.EntityId == "entity:business-service");
+
+        Assert.True(candidate.Score < 0);
+        Assert.Contains(candidate.MatchReasons, reason => reason.Signal == "member name" && reason.Points > 0);
+        Assert.Contains(candidate.MatchReasons, reason => reason.Signal == "non-test initiative penalty");
+    }
+
+    [Fact]
+    public void Retrieve_StableIdentityBreaksEqualScoreTies()
+    {
+        var snapshot = AddComponent(ProjectMemoryTestFactory.Create(), "entity:z", "SignalAlpha", "Demo.Core.SignalAlpha", "project:core", []);
+        snapshot = AddComponent(snapshot, "entity:a", "SignalBeta", "Demo.Core.SignalBeta", "project:core", []);
+
+        var first = Retrieve("signal", snapshot).Components.Where(item => item.EntityId is "entity:z" or "entity:a").Select(item => item.FullName).ToArray();
+        var second = Retrieve("signal", snapshot).Components.Where(item => item.EntityId is "entity:z" or "entity:a").Select(item => item.FullName).ToArray();
+
+        Assert.Equal(["Demo.Core.SignalAlpha", "Demo.Core.SignalBeta"], first);
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void TermRarity_RareTermsReceiveLargerBoundedDeterministicContribution()
+    {
+        var first = TermRarityIndex.Create([["common", "rare"], ["common"], ["common"]]);
+        var reordered = TermRarityIndex.Create([["common"], ["common", "rare"], ["common"]]);
+
+        Assert.True(first.Contribution("rare") > first.Contribution("common"));
+        Assert.InRange(first.Contribution("rare"), 0, 4);
+        Assert.Equal(first.Contribution("rare"), reordered.Contribution("rare"));
+        Assert.Equal(0, TermRarityIndex.Create([]).Contribution("missing"));
+    }
+
+    [Fact]
+    public void TestCandidateClassifier_UsesOnlyConventionalProjectEvidence()
+    {
+        var suffix = ProjectMemoryTestFactory.Create().Projects[0] with { Name = "Demo.Tests" };
+        var path = suffix with { Name = "Demo", RelativePath = "tests/Demo/Demo.csproj" };
+        var incidental = suffix with { Name = "ContestTools", RelativePath = "src/TestHelpers/TestHelpers.csproj" };
+
+        Assert.True(TestCandidateClassifier.IsTestProject(suffix));
+        Assert.True(TestCandidateClassifier.IsTestProject(path));
+        Assert.False(TestCandidateClassifier.IsTestProject(incidental));
+    }
+
     private static CandidateRetrievalResult Retrieve(string term, RepositorySnapshot? snapshot = null)
     {
         snapshot ??= ProjectMemoryTestFactory.Create();
@@ -166,6 +323,44 @@ public sealed class InitiativeCandidateRetrieverTests
         {
             Entities = snapshot.Entities.Concat(added).ToArray(),
             Relations = snapshot.Relations.Concat(added.Select(item => ProjectMemoryTestFactory.Contains(namespaceEntity, item))).ToArray()
+        };
+    }
+
+    private static RepositorySnapshot AddComponent(
+        RepositorySnapshot snapshot,
+        string id,
+        string name,
+        string fullName,
+        string projectId,
+        IReadOnlyList<string> members)
+    {
+        var component = ProjectMemoryTestFactory.Entity(id, name, fullName, CodeEntityType.Class, $"src/Core/{name}.cs", projectId);
+        var namespaceEntity = snapshot.Entities.First(item => item.Id == "entity:ns-core");
+        var memberEntities = members.Select((member, index) => ProjectMemoryTestFactory.Entity(
+            $"{id}:member:{index}", member, $"{fullName}.{member}()", CodeEntityType.Method,
+            component.RelativeFilePath, projectId)).ToArray();
+        return snapshot with
+        {
+            Entities = snapshot.Entities.Concat([component]).Concat(memberEntities).ToArray(),
+            Relations = snapshot.Relations.Concat([ProjectMemoryTestFactory.Contains(namespaceEntity, component)])
+                .Concat(memberEntities.Select(member => ProjectMemoryTestFactory.Contains(component, member))).ToArray()
+        };
+    }
+
+    private static RepositorySnapshot AddProductionTwin(RepositorySnapshot snapshot)
+    {
+        snapshot = MarkBusinessProjectAsTests(snapshot);
+        return AddComponent(snapshot, "entity:production-twin", "BusinessService", "Demo.Core.BusinessService", "project:core", []);
+    }
+
+    private static RepositorySnapshot MarkBusinessProjectAsTests(RepositorySnapshot snapshot)
+    {
+        var project = snapshot.Projects.Single(item => item.Id == "project:business");
+        return snapshot with
+        {
+            Projects = snapshot.Projects.Select(item => item.Id == project.Id
+                ? item with { Name = "Business.Tests", RelativePath = "tests/Business.Tests/Business.Tests.csproj" }
+                : item).ToArray()
         };
     }
 }

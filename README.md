@@ -4,7 +4,7 @@ Engineering Brain is a local-first engineering intelligence platform. Its goal i
 
 ## Current status
 
-This repository contains the project-aware, incremental foundation, deterministic Project Memory, the first evidence-validated initiative-analysis workflow, and an offline evaluation harness. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
+This repository contains the project-aware, incremental foundation, deterministic Project Memory, the first evidence-validated initiative-analysis workflow, and an offline evaluation harness. Deterministic lexical retrieval uses field-specific scoring, bounded term-rarity and member signals, and a contextual test-project penalty before any model call. The `brain scan` workflow scans a repository locally and writes a structured snapshot containing:
 
 - repository and current Git metadata;
 - discovered files, sizes, and content hashes where safe and reasonable;
@@ -127,7 +127,7 @@ Run the versioned suite offline:
 dotnet run --project src/EngineeringBrain.Cli -- eval .
 ```
 
-The report includes entity Recall/Precision at 5 and 10, MRR, project Recall@3/MRR, test-candidate noise, category breakdowns, context token distribution, evidence validation, clarification behavior, and regressions. A structured runtime result is written outside the repository under `~/.engineering-brain`; it contains metrics and identities, not prompts or source context.
+The report separates tuning, holdout, and all-case metrics, including entity Recall/Precision at 5 and 10, MRR, project Recall@3/MRR, test-candidate noise at 5 and 10, category breakdowns, context token distribution, evidence validation, clarification behavior, and regressions. A structured runtime result is written outside the repository under `~/.engineering-brain`; it contains metrics and identities, not prompts or source context.
 
 Create or deliberately accept a new baseline only through:
 
@@ -141,4 +141,4 @@ Normal evaluation never rewrites `evaluations/baseline.json`. Regression thresho
 
 This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, source-body retrieval, embeddings, semantic/vector search, automatic implementation, a UI, or complete impact analysis. Initiative retrieval is lexical and graph-bounded; it finds integration candidates, not guaranteed implementation locations. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
 
-See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
+See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), [the lexical ranking decision](docs/decisions/0007-retrieval-ranking.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
