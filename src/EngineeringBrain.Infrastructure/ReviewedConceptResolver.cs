@@ -70,7 +70,6 @@ public sealed class ReviewedConceptResolver
 
                 resolved.Add((component, new ResolvedReviewedConcept(
                     declaration.ConceptId,
-                    declaration.Definition,
                     declaration.AnchorPolicy,
                     declaration.AnchorTokens,
                     declaration.QualificationSupportTokens,

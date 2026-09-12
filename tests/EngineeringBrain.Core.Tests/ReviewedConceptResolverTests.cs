@@ -1,3 +1,4 @@
+using System.Text.Json;
 using EngineeringBrain.Core;
 using EngineeringBrain.Infrastructure;
 
@@ -117,5 +118,23 @@ public sealed class ReviewedConceptResolverTests
             result.Profiles.OrderBy(item => item.EntityId, StringComparer.Ordinal).Select(item => item.EntityId),
             result.Profiles.Select(item => item.EntityId));
         Assert.All(result.Profiles, item => Assert.NotEmpty(item.Concepts));
+    }
+
+    [Fact]
+    public void Resolve_RuntimeProfilesExcludeReviewedDefinitionProse()
+    {
+        const string reviewedDefinition = "Audit-only definition that must not enter runtime profiles.";
+        var evidence = ReviewedConceptTestData.Evidence();
+        var declaration = ReviewedConceptTestData.WithFingerprint(
+            ReviewedConceptTestData.Declaration() with { Definition = reviewedDefinition });
+        var catalog = ReviewedConceptTestData.Catalog() with { Declarations = [declaration] };
+        var validation = new ReviewedConceptValidator().Validate(catalog, evidence);
+
+        var result = new ReviewedConceptResolver().Resolve(
+            ReviewedConceptTestData.Loaded(catalog), validation, evidence);
+        var json = JsonSerializer.Serialize(result.Profiles);
+
+        Assert.DoesNotContain(reviewedDefinition, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("definition", json, StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -67,7 +67,6 @@ public sealed record ReviewedConceptReview(
 
 public sealed record ResolvedReviewedConcept(
     string ConceptId,
-    string Definition,
     ReviewedConceptAnchorPolicy AnchorPolicy,
     IReadOnlyList<IReadOnlyList<string>> AnchorTokens,
     IReadOnlyList<string> QualificationSupportTokens,

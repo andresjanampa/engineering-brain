@@ -89,7 +89,6 @@ internal static class ReviewedConceptTestData
         IReadOnlyList<string>? qualificationSupport = null,
         IReadOnlyList<string>? contextSupport = null) => new(
         conceptId,
-        $"Reviewed definition for {conceptId}.",
         policy,
         anchors ?? [],
         qualificationSupport ?? [],
