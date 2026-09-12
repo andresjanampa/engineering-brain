@@ -189,15 +189,7 @@ internal static class BrainCli
     {
         foreach (var diagnostic in result.Diagnostics)
         {
-            var identity = string.Join(' ', new[] { diagnostic.ConceptId, diagnostic.EntityId }
-                .Where(value => !string.IsNullOrWhiteSpace(value)));
-            var message = diagnostic.Message.Length <= 240
-                ? diagnostic.Message
-                : diagnostic.Message[..240];
-            Console.Error.WriteLine(
-                $"Reviewed concept {diagnostic.Severity} {diagnostic.Code}"
-                + (identity.Length == 0 ? string.Empty : $" [{identity}]")
-                + $": {message}");
+            Console.Error.WriteLine(ReviewedConceptDiagnosticFormatter.Format(diagnostic));
         }
     }
 
