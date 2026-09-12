@@ -66,6 +66,52 @@ internal static class ReviewedConceptTestData
         return ReviewedConceptEvidenceContext.FromMemory(Memory(snapshot, build.Manifest));
     }
 
+    public static ComponentCandidate Candidate(
+        string entityId,
+        int score,
+        string? name = null,
+        IReadOnlyList<MatchReason>? reasons = null) => new(
+        entityId,
+        name ?? entityId.Split(':')[^1],
+        $"Demo.{name ?? entityId.Split(':')[^1]}",
+        "project:core",
+        $"src/Core/{name ?? entityId.Split(':')[^1]}.cs",
+        CodeEntityType.Class,
+        ResolutionLevel.Semantic,
+        score,
+        false,
+        reasons ?? [new MatchReason("member name", "analysis", score)]);
+
+    public static ResolvedReviewedConcept Concept(
+        string conceptId,
+        ReviewedConceptAnchorPolicy policy = ReviewedConceptAnchorPolicy.NotRequired,
+        IReadOnlyList<IReadOnlyList<string>>? anchors = null,
+        IReadOnlyList<string>? qualificationSupport = null,
+        IReadOnlyList<string>? contextSupport = null) => new(
+        conceptId,
+        $"Reviewed definition for {conceptId}.",
+        policy,
+        anchors ?? [],
+        qualificationSupport ?? [],
+        contextSupport ?? [],
+        $"fingerprint-{conceptId}");
+
+    public static ComponentConceptProfile Profile(
+        string entityId,
+        params ResolvedReviewedConcept[] concepts) => new(
+        entityId,
+        $"fingerprint-{entityId}",
+        concepts);
+
+    public static ComponentConceptProfile PersistenceProfile(string entityId) => Profile(
+        entityId,
+        Concept(
+            "initiative-analysis-persistence",
+            ReviewedConceptAnchorPolicy.Clear,
+            [["initiative"]],
+            ["persistence"],
+            ["analysis"]));
+
     public static ProjectMemorySyncResult Memory(
         RepositorySnapshot snapshot,
         ProjectMemoryManifest manifest) => new(
