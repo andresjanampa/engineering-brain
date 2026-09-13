@@ -461,6 +461,134 @@ public sealed class OutboundContextGuardTests
         AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
     }
 
+    [Theory]
+    [MemberData(nameof(CompleteMultilineLiteralBodies))]
+    public void Inspect_CompleteMultilineLiteralBodiesAreBlocked(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    public static TheoryData<string> CompleteMultilineLiteralBodies => new()
+    {
+        Lines(
+            "public void Save(string value = @\"first line",
+            "=> second line\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first line",
+            "{ ; ( ) } => // not comment",
+            "second line\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first line",
+            "=> second line",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first line",
+            "{ ; ( ) } =>",
+            "// still literal",
+            "second line",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first \"\"quoted\"\"",
+            "{ ; ( ) } =>",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first",
+            "// not comment",
+            "/* not block comment */",
+            "{ ; ( ) } =>",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "\"quoted\"",
+            "{ ; ( ) } =>",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "// not comment",
+            "/* not block comment */",
+            "{ ; ( ) } =>",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first",
+            "{",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first",
+            ";",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first",
+            "( )",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first",
+            "=>",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"\"",
+            "ordinary \"\"\" quotes and { ; ( ) } =>",
+            "\"\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @$\"first",
+            "{ ; ( ) } =>",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @$\"first" + '\\' + "\")",
+            "{",
+            "    return;",
+            "}")
+    };
+
     [Fact]
     public void Inspect_WhitespaceAndCommentsBetweenDeclarationAndBraceCannotHideBody()
     {
@@ -532,6 +660,68 @@ public sealed class OutboundContextGuardTests
     public void Inspect_QuotedArrowSignaturesAndExpressionBodiedMembersRemainAllowed(string content)
     {
         Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Theory]
+    [MemberData(nameof(MultilineLiteralSignatures))]
+    public void Inspect_MultilineLiteralSignaturesWithoutBodiesAreAllowed(string signature)
+    {
+        Assert.Empty(_guard.Inspect(Request(signature)));
+    }
+
+    public static TheoryData<string> MultilineLiteralSignatures => new()
+    {
+        Lines("public void Save(string value = @\"first", "=> second\");"),
+        Lines("public void Save(string value = \"\"\"", "first", "=> second", "\"\"\");"),
+        Lines("public void Save(string value = @\"first", "{ ; ( ) } =>", "second\");"),
+        Lines("public void Save(string value = \"\"\"", "first", "{ ; ( ) } =>", "second", "\"\"\");"),
+        Lines("public void Save(string value = @\"first \"\"quoted\"\"", "=> second\");"),
+        Lines("public void Save(string value = \"\"\"", "\"quoted\"", "=> second", "\"\"\");"),
+        Lines("public void Save(string value = \"\"\"\"", "ordinary \"\"\" quotes and { ; ( ) } =>", "\"\"\"\");"),
+        Lines("public void Save(string value = @$\"first", "{ ; ( ) } =>", "second\");"),
+        Lines("public void Save(string value = @$\"first" + '\\' + "\");")
+    };
+
+    [Theory]
+    [InlineData("public void Save(string value = @\"first\nsecond")]
+    [InlineData("public void Save(string value = \"\"\"\nfirst\nsecond")]
+    [InlineData("public void Save(string value = \"\"\"\"\nfirst\n\"\"\"")]
+    [InlineData("public void Save(string value = \"unfinished")]
+    [InlineData("public void Save(char value = 'x")]
+    [InlineData("public void Save(string value) /* unfinished")]
+    public void Inspect_UnterminatedLexicalConstructInPlausibleDeclarationFailsClosed(string content)
+    {
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData("@\"unfinished prose\npublic void Save()\n{\n    return;\n}")]
+    [InlineData("\"\"\"\nunfinished prose\npublic void Save()\n{\n    return;\n}")]
+    public void Inspect_UnfinishedProseLiteralCannotHideLaterBody(string content)
+    {
+        AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.SourceBodies);
+    }
+
+    [Fact]
+    public void Inspect_NonMatchingRawStringClosingDelimiterFailsClosed()
+    {
+        const string content = "public void Save(string value = \"\"\"\nfirst\n\"\"\"\")";
+
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveCFamilyHeaderInsideMultilineLiteralFailsClosed()
+    {
+        var content = Lines("public void Save(string value = @\"first", new string('x', 16_385));
+
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
     }
 
     [Fact]
@@ -661,6 +851,8 @@ public sealed class OutboundContextGuardTests
         userData,
         500,
         100);
+
+    private static string Lines(params string[] lines) => string.Join('\n', lines);
 
     private static OutboundInspectionFinding AssertFinding(
         IReadOnlyList<OutboundInspectionFinding> findings,

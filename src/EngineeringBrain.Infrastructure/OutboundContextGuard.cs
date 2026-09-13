@@ -9,6 +9,7 @@ public sealed partial class OutboundContextGuard
 {
     private const int MaximumFindingCount = 99;
     private const int MaximumCFamilyHeaderCharacters = 16_384;
+    private const int MaximumRawStringDelimiterQuotes = 32;
     private const int MaximumInspectionCharacters = 1_000_000;
     private const int MaximumJsonCandidates = 32;
     private const int MaximumJsonNestingDepth = 64;
@@ -407,11 +408,17 @@ public sealed partial class OutboundContextGuard
         var count = 0;
         var state = CFamilyScanState.Searching;
         var header = new StringBuilder();
-        var inBlockComment = false;
+        var scanner = new CFamilyLexicalScanner();
 
         foreach (var rawLine in lines)
         {
-            var line = StripCFamilyComments(rawLine.TrimEnd('\r'), ref inBlockComment);
+            if (state == CFamilyScanState.Searching)
+            {
+                scanner.PrepareForSearchLine();
+            }
+
+            var scan = scanner.ScanLine(rawLine.TrimEnd('\r'));
+            var line = scan.Text;
 
             if (state == CFamilyScanState.Searching)
             {
@@ -424,11 +431,12 @@ public sealed partial class OutboundContextGuard
                 header.Clear();
                 state = CFamilyScanState.CollectingHeader;
                 line = line[declarationStart..];
+                scan = new CFamilyLexicalScan(line, scan.Structure.Slice(declarationStart));
             }
 
             if (state == CFamilyScanState.CollectingHeader)
             {
-                var structure = ScanCFamilyStructure(line);
+                var structure = scan.Structure;
                 var openingBrace = structure.OpeningBrace;
                 var terminator = structure.Terminator;
                 var headerEnd = openingBrace >= 0 ? openingBrace : line.Length;
@@ -461,10 +469,15 @@ public sealed partial class OutboundContextGuard
                 continue;
             }
 
-            if (ScanCFamilyStructure(line).ClosingBrace >= 0)
+            if (scan.Structure.ClosingBrace >= 0)
             {
                 ResetCFamilyScan();
             }
+        }
+
+        if (state != CFamilyScanState.Searching && !scanner.IsComplete)
+        {
+            throw new InvalidDataException("Outbound C-family lexical scan was incomplete.");
         }
 
         return count;
@@ -473,6 +486,7 @@ public sealed partial class OutboundContextGuard
         {
             state = CFamilyScanState.Searching;
             header.Clear();
+            scanner.Reset();
         }
     }
 
@@ -657,154 +671,8 @@ public sealed partial class OutboundContextGuard
         header.Append(value);
     }
 
-    private static string StripCFamilyComments(string line, ref bool inBlockComment)
-    {
-        var result = new StringBuilder(line.Length);
-        var lexicalState = CFamilyLexicalState.Normal;
-        var escaped = false;
-
-        for (var index = 0; index < line.Length; index++)
-        {
-            var character = line[index];
-            var next = index + 1 < line.Length ? line[index + 1] : '\0';
-
-            if (inBlockComment)
-            {
-                if (character == '*' && next == '/')
-                {
-                    inBlockComment = false;
-                    index++;
-                }
-
-                continue;
-            }
-
-            if (!IsUnquotedCFamilyCharacter(character, ref lexicalState, ref escaped))
-            {
-                result.Append(character);
-                continue;
-            }
-
-            if (character == '/' && next == '/')
-            {
-                break;
-            }
-
-            if (character == '/' && next == '*')
-            {
-                inBlockComment = true;
-                index++;
-                continue;
-            }
-
-            result.Append(character);
-        }
-
-        return result.ToString();
-    }
-
-    private static CFamilyStructure ScanCFamilyStructure(string value)
-    {
-        var openingBrace = -1;
-        var closingBrace = -1;
-        var terminator = -1;
-        var openingParenthesis = -1;
-        var closingParenthesis = -1;
-        var expressionArrow = -1;
-        var parenthesisDepth = 0;
-        var lexicalState = CFamilyLexicalState.Normal;
-        var escaped = false;
-
-        for (var index = 0; index < value.Length; index++)
-        {
-            var character = value[index];
-            if (!IsUnquotedCFamilyCharacter(character, ref lexicalState, ref escaped))
-            {
-                continue;
-            }
-
-            switch (character)
-            {
-                case '{' when openingBrace < 0:
-                    openingBrace = index;
-                    break;
-                case '}' when closingBrace < 0:
-                    closingBrace = index;
-                    break;
-                case ';' when terminator < 0:
-                    terminator = index;
-                    break;
-                case '=' when expressionArrow < 0
-                    && index + 1 < value.Length
-                    && value[index + 1] == '>':
-                    expressionArrow = index;
-                    break;
-                case '(' when closingParenthesis < 0:
-                    if (parenthesisDepth == 0 && openingParenthesis < 0)
-                    {
-                        openingParenthesis = index;
-                    }
-
-                    parenthesisDepth++;
-                    break;
-                case ')' when parenthesisDepth > 0 && closingParenthesis < 0:
-                    parenthesisDepth--;
-                    if (parenthesisDepth == 0)
-                    {
-                        closingParenthesis = index;
-                    }
-
-                    break;
-            }
-        }
-
-        return new CFamilyStructure(
-            openingBrace,
-            closingBrace,
-            terminator,
-            openingParenthesis,
-            closingParenthesis,
-            expressionArrow);
-    }
-
-    private static bool IsUnquotedCFamilyCharacter(
-        char character,
-        ref CFamilyLexicalState state,
-        ref bool escaped)
-    {
-        if (state != CFamilyLexicalState.Normal)
-        {
-            if (escaped)
-            {
-                escaped = false;
-            }
-            else if (character == '\\')
-            {
-                escaped = true;
-            }
-            else if ((state == CFamilyLexicalState.DoubleQuotedString && character == '"')
-                || (state == CFamilyLexicalState.SingleQuotedCharacter && character == '\''))
-            {
-                state = CFamilyLexicalState.Normal;
-            }
-
-            return false;
-        }
-
-        if (character == '"')
-        {
-            state = CFamilyLexicalState.DoubleQuotedString;
-            return false;
-        }
-
-        if (character == '\'')
-        {
-            state = CFamilyLexicalState.SingleQuotedCharacter;
-            return false;
-        }
-
-        return true;
-    }
+    private static CFamilyStructure ScanCFamilyStructure(string value) =>
+        new CFamilyLexicalScanner().ScanLine(value).Structure;
 
     private static bool IsCFamilyDeclarationSuffix(string value)
     {
@@ -830,9 +698,271 @@ public sealed partial class OutboundContextGuard
     private enum CFamilyLexicalState
     {
         Normal,
-        DoubleQuotedString,
-        SingleQuotedCharacter
+        LineComment,
+        BlockComment,
+        RegularString,
+        VerbatimString,
+        RawString,
+        CharacterLiteral
     }
+
+    private sealed class CFamilyLexicalScanner
+    {
+        private CFamilyLexicalState _state;
+        private bool _escaped;
+        private int _rawDelimiterLength;
+
+        public bool IsComplete => _state == CFamilyLexicalState.Normal;
+
+        public CFamilyLexicalScan ScanLine(string line)
+        {
+            var text = new StringBuilder(line.Length);
+            var openingBrace = -1;
+            var closingBrace = -1;
+            var terminator = -1;
+            var openingParenthesis = -1;
+            var closingParenthesis = -1;
+            var expressionArrow = -1;
+            var parenthesisDepth = 0;
+
+            for (var index = 0; index < line.Length; index++)
+            {
+                var character = line[index];
+                var next = index + 1 < line.Length ? line[index + 1] : '\0';
+
+                switch (_state)
+                {
+                    case CFamilyLexicalState.LineComment:
+                        index = line.Length;
+                        continue;
+                    case CFamilyLexicalState.BlockComment:
+                        if (character == '*' && next == '/')
+                        {
+                            _state = CFamilyLexicalState.Normal;
+                            index++;
+                        }
+
+                        continue;
+                    case CFamilyLexicalState.RegularString:
+                    case CFamilyLexicalState.CharacterLiteral:
+                        if (_escaped)
+                        {
+                            text.Append(' ');
+                            _escaped = false;
+                        }
+                        else if (character == '\\')
+                        {
+                            text.Append(' ');
+                            _escaped = true;
+                        }
+                        else if ((_state == CFamilyLexicalState.RegularString && character == '"')
+                            || (_state == CFamilyLexicalState.CharacterLiteral && character == '\''))
+                        {
+                            text.Append(character);
+                            _state = CFamilyLexicalState.Normal;
+                        }
+                        else
+                        {
+                            text.Append(' ');
+                        }
+
+                        continue;
+                    case CFamilyLexicalState.VerbatimString:
+                        if (character != '"')
+                        {
+                            text.Append(' ');
+                            continue;
+                        }
+
+                        if (next == '"')
+                        {
+                            text.Append("  ");
+                            index++;
+                        }
+                        else
+                        {
+                            text.Append(character);
+                            _state = CFamilyLexicalState.Normal;
+                        }
+
+                        continue;
+                    case CFamilyLexicalState.RawString:
+                        if (character != '"')
+                        {
+                            text.Append(' ');
+                            continue;
+                        }
+
+                        var closingQuoteCount = CountConsecutiveQuotes(line, index);
+                        index += closingQuoteCount - 1;
+                        if (closingQuoteCount > _rawDelimiterLength)
+                        {
+                            throw new InvalidDataException("Outbound C-family raw-string delimiter was invalid.");
+                        }
+
+                        if (closingQuoteCount == _rawDelimiterLength)
+                        {
+                            text.Append(line.AsSpan(index - closingQuoteCount + 1, closingQuoteCount));
+                            _state = CFamilyLexicalState.Normal;
+                            _rawDelimiterLength = 0;
+                        }
+                        else
+                        {
+                            text.Append(' ', closingQuoteCount);
+                        }
+
+                        continue;
+                    case CFamilyLexicalState.Normal:
+                        break;
+                    default:
+                        throw new InvalidOperationException("Unknown C-family lexical state.");
+                }
+
+                if (character == '/' && next == '/')
+                {
+                    _state = CFamilyLexicalState.LineComment;
+                    index = line.Length;
+                    continue;
+                }
+
+                if (character == '/' && next == '*')
+                {
+                    _state = CFamilyLexicalState.BlockComment;
+                    index++;
+                    continue;
+                }
+
+                if (character == '@'
+                    && next == '$'
+                    && index + 2 < line.Length
+                    && line[index + 2] == '"')
+                {
+                    text.Append("@$\"");
+                    _state = CFamilyLexicalState.VerbatimString;
+                    index += 2;
+                    continue;
+                }
+
+                if (character == '@' && next == '"')
+                {
+                    text.Append(character);
+                    text.Append(next);
+                    _state = CFamilyLexicalState.VerbatimString;
+                    index++;
+                    continue;
+                }
+
+                if (character == '"')
+                {
+                    var openingQuoteCount = CountConsecutiveQuotes(line, index);
+                    if (openingQuoteCount >= 3)
+                    {
+                        if (openingQuoteCount > MaximumRawStringDelimiterQuotes)
+                        {
+                            throw new InvalidDataException("Outbound C-family raw-string delimiter limit exceeded.");
+                        }
+
+                        text.Append(line.AsSpan(index, openingQuoteCount));
+                        _state = CFamilyLexicalState.RawString;
+                        _rawDelimiterLength = openingQuoteCount;
+                        index += openingQuoteCount - 1;
+                        continue;
+                    }
+
+                    text.Append(character);
+                    _state = CFamilyLexicalState.RegularString;
+                    _escaped = false;
+                    continue;
+                }
+
+                if (character == '\'')
+                {
+                    text.Append(character);
+                    _state = CFamilyLexicalState.CharacterLiteral;
+                    _escaped = false;
+                    continue;
+                }
+
+                var position = text.Length;
+                switch (character)
+                {
+                    case '{' when openingBrace < 0:
+                        openingBrace = position;
+                        break;
+                    case '}' when closingBrace < 0:
+                        closingBrace = position;
+                        break;
+                    case ';' when terminator < 0:
+                        terminator = position;
+                        break;
+                    case '=' when expressionArrow < 0 && next == '>':
+                        expressionArrow = position;
+                        break;
+                    case '(' when closingParenthesis < 0:
+                        if (parenthesisDepth == 0 && openingParenthesis < 0)
+                        {
+                            openingParenthesis = position;
+                        }
+
+                        parenthesisDepth++;
+                        break;
+                    case ')' when parenthesisDepth > 0 && closingParenthesis < 0:
+                        parenthesisDepth--;
+                        if (parenthesisDepth == 0)
+                        {
+                            closingParenthesis = position;
+                        }
+
+                        break;
+                }
+
+                text.Append(character);
+            }
+
+            if (_state == CFamilyLexicalState.LineComment)
+            {
+                _state = CFamilyLexicalState.Normal;
+            }
+
+            return new CFamilyLexicalScan(
+                text.ToString(),
+                new CFamilyStructure(
+                    openingBrace,
+                    closingBrace,
+                    terminator,
+                    openingParenthesis,
+                    closingParenthesis,
+                    expressionArrow));
+        }
+
+        public void Reset()
+        {
+            _state = CFamilyLexicalState.Normal;
+            _escaped = false;
+            _rawDelimiterLength = 0;
+        }
+
+        public void PrepareForSearchLine()
+        {
+            if (_state != CFamilyLexicalState.BlockComment)
+            {
+                Reset();
+            }
+        }
+
+        private static int CountConsecutiveQuotes(string value, int start)
+        {
+            var count = 0;
+            while (start + count < value.Length && value[start + count] == '"')
+            {
+                count++;
+            }
+
+            return count;
+        }
+    }
+
+    private readonly record struct CFamilyLexicalScan(string Text, CFamilyStructure Structure);
 
     private readonly record struct CFamilyStructure(
         int OpeningBrace,
@@ -840,7 +970,18 @@ public sealed partial class OutboundContextGuard
         int Terminator,
         int OpeningParenthesis,
         int ClosingParenthesis,
-        int ExpressionArrow);
+        int ExpressionArrow)
+    {
+        public CFamilyStructure Slice(int start) => new(
+            Shift(OpeningBrace, start),
+            Shift(ClosingBrace, start),
+            Shift(Terminator, start),
+            Shift(OpeningParenthesis, start),
+            Shift(ClosingParenthesis, start),
+            Shift(ExpressionArrow, start));
+
+        private static int Shift(int position, int start) => position < start ? -1 : position - start;
+    }
 
     private static bool IsCFamilyModifier(string value) => value is
         "public" or "private" or "protected" or "internal" or "static" or "abstract" or "sealed"
