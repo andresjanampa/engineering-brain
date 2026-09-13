@@ -348,6 +348,85 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
+    public async Task Promotion_WritesOnlyTargetBranchSemanticDirectory()
+    {
+        using var fixture = new PromotionFixture();
+        var before = fixture.ExternalFiles();
+
+        await fixture.PromoteAsync();
+
+        var added = fixture.ExternalFiles().Except(before, StringComparer.OrdinalIgnoreCase).ToArray();
+        Assert.NotEmpty(added);
+        Assert.All(added, path => Assert.StartsWith(
+            Path.GetDirectoryName(fixture.TargetPath)!,
+            path,
+            StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Promotion_DoesNotModifySourceCatalog()
+    {
+        using var fixture = new PromotionFixture();
+        var bytes = await File.ReadAllBytesAsync(fixture.SourcePath);
+        var timestamp = File.GetLastWriteTimeUtc(fixture.SourcePath);
+
+        await fixture.PromoteAsync();
+
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(fixture.SourcePath));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(fixture.SourcePath));
+    }
+
+    [Fact]
+    public async Task Promotion_DoesNotCreateSnapshotMemoryOrEvaluationArtifacts()
+    {
+        using var fixture = new PromotionFixture();
+
+        await fixture.PromoteAsync();
+
+        Assert.DoesNotContain(fixture.ExternalFiles(), path =>
+            path.Contains($"{Path.DirectorySeparatorChar}snapshots{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+            || path.Contains($"{Path.DirectorySeparatorChar}evaluations{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+            || Path.GetFileName(path).Equals("manifest.json", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Promotion_DoesNotModifyFilesInsideRepositoryRoot()
+    {
+        using var fixture = new PromotionFixture();
+        var before = fixture.RepositoryProjection();
+
+        await fixture.PromoteAsync();
+
+        Assert.Equal(before, fixture.RepositoryProjection());
+    }
+
+    [Fact]
+    public async Task SourceCatalogFromDeletedBranchNameWorksWhenLocalArtifactExists()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.RetargetSourceCatalogAsync("deleted/source");
+
+        var result = await fixture.PromoteAsync(sourceBranch: "deleted/source");
+
+        Assert.Equal(ReviewedConceptPromotionOutcome.Promoted, result.Outcome);
+        Assert.Equal(25, result.DeclarationCount);
+    }
+
+    [Fact]
+    public async Task SourceCatalogAbsentFailsWithoutGitOrNetworkLookup()
+    {
+        using var fixture = new PromotionFixture();
+        File.Delete(fixture.SourcePath);
+        var git = new CountingGitInfoProvider(new GitInfo(true, "main", "target-head", null, true));
+
+        var result = await fixture.PromoteAsync(gitInfo: git);
+
+        AssertBlocked(result, "RCL101");
+        Assert.Equal(0, git.CallCount);
+        Assert.False(File.Exists(fixture.TargetPath));
+    }
+
+    [Fact]
     public async Task GetStatusAsync_AbsentReturnsZeroCountsAndAbsent()
     {
         using var fixture = new TemporaryDirectory(create: false);
@@ -533,8 +612,11 @@ public sealed class ReviewedConceptLifecycleServiceTests
 
         public PromotionFixture()
         {
-            SourceRoot = Path.Combine(_root.Path, "source");
-            TargetRoot = Path.Combine(_root.Path, "target");
+            RepositoryRoot = Path.Combine(_root.Path, "repository");
+            Directory.CreateDirectory(RepositoryRoot);
+            File.WriteAllText(Path.Combine(RepositoryRoot, "README.md"), "# Test repository\n");
+            SourceRoot = Path.Combine(_root.Path, "external", "source");
+            TargetRoot = Path.Combine(_root.Path, "external", "target");
             TargetEvidence = CreateTargetEvidence();
             SourceCatalog = CreateSourceCatalog(TargetEvidence);
             WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(SourceCatalog)).GetAwaiter().GetResult();
@@ -542,6 +624,7 @@ public sealed class ReviewedConceptLifecycleServiceTests
 
         public string SourceRoot { get; }
         public string TargetRoot { get; }
+        public string RepositoryRoot { get; }
         public string SourcePath => new LocalReviewedConceptStore().GetPath(SourceRoot);
         public string TargetPath => new LocalReviewedConceptStore().GetPath(TargetRoot);
         public ReviewedConceptCatalog SourceCatalog { get; }
@@ -558,13 +641,25 @@ public sealed class ReviewedConceptLifecycleServiceTests
                 writer: writer,
                 gitInfo: gitInfo ?? new StaticGitInfoProvider(_git)).PromoteAsync(
                 "demo",
-                _root.Path,
+                RepositoryRoot,
                 sourceBranch,
                 targetBranch,
                 SourceRoot,
                 TargetRoot,
                 targetEvidence ?? TargetEvidence,
                 analyzedGit ?? _git);
+
+        public string[] ExternalFiles() => Directory.Exists(Path.Combine(_root.Path, "external"))
+            ? Directory.GetFiles(Path.Combine(_root.Path, "external"), "*", SearchOption.AllDirectories)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+            : [];
+
+        public string[] RepositoryProjection() => Directory.GetFiles(
+                RepositoryRoot, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .Select(path => $"{Path.GetRelativePath(RepositoryRoot, path)}|{KnowledgeIdentity.ContentHash(File.ReadAllText(path))}")
+            .ToArray();
 
         public async Task SeedTargetAsync()
         {
@@ -619,6 +714,16 @@ public sealed class ReviewedConceptLifecycleServiceTests
             var changed = SourceCatalog with
             {
                 Declarations = [declaration, .. SourceCatalog.Declarations.Skip(1)]
+            };
+            await WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(changed));
+        }
+
+        public async Task RetargetSourceCatalogAsync(string sourceBranch)
+        {
+            var changed = SourceCatalog with
+            {
+                Branch = sourceBranch,
+                BranchKey = KnowledgeIdentity.CreateBranchKey(sourceBranch)
             };
             await WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(changed));
         }
@@ -711,6 +816,20 @@ public sealed class ReviewedConceptLifecycleServiceTests
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(info);
+        }
+    }
+
+    private sealed class CountingGitInfoProvider(GitInfo info) : IGitInfoProvider
+    {
+        public int CallCount { get; private set; }
+
+        public Task<GitInfo> GetInfoAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
             return Task.FromResult(info);
         }
     }

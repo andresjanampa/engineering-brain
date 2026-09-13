@@ -78,6 +78,23 @@ public sealed class LocalReviewedConceptStoreTests
     }
 
     [Fact]
+    public async Task LoadAsync_ValidArtifactDoesNotRewriteBytesOrTimestamp()
+    {
+        using var fixture = new TemporaryDirectory();
+        var store = new LocalReviewedConceptStore();
+        var path = store.GetPath(fixture.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var bytes = ReviewedConceptSerializer.Serialize(ReviewedConceptTestData.Catalog());
+        await File.WriteAllTextAsync(path, bytes);
+        var timestamp = File.GetLastWriteTimeUtc(path);
+
+        await store.LoadAsync(fixture.Path);
+
+        Assert.Equal(bytes, await File.ReadAllTextAsync(path));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+    }
+
+    [Fact]
     public async Task LoadAsync_CanceledReadPropagatesCancellation()
     {
         using var fixture = new TemporaryDirectory();
