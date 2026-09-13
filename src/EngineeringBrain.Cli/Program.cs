@@ -14,6 +14,11 @@ internal static class BrainCli
             return 0;
         }
 
+        if (args[0].Equals("concepts", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunConceptsAsync(args);
+        }
+
         var isScan = args[0].Equals("scan", StringComparison.OrdinalIgnoreCase);
         var isMemorySync = args.Length >= 2
             && args[0].Equals("memory", StringComparison.OrdinalIgnoreCase)
@@ -83,6 +88,176 @@ internal static class BrainCli
             Console.Error.WriteLine($"Command failed: {exception.Message}");
             return 1;
         }
+    }
+
+    private static async Task<int> RunConceptsAsync(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine("Concepts requires status, validate, or promote.");
+            WriteUsage();
+            return 2;
+        }
+
+        var operation = args[1].ToLowerInvariant();
+        if (operation is "status" or "validate")
+        {
+            if (args.Length > 3 || (args.Length == 3 && args[2].StartsWith("--", StringComparison.Ordinal)))
+            {
+                Console.Error.WriteLine($"Usage: brain concepts {operation} [path]");
+                return 2;
+            }
+
+            return await RunConceptInspectionAsync(
+                operation,
+                args.Length == 3 ? args[2] : Environment.CurrentDirectory);
+        }
+
+        if (operation != "promote")
+        {
+            Console.Error.WriteLine("Unknown concepts command.");
+            WriteUsage();
+            return 2;
+        }
+
+        if (!TryParseConceptPromotion(args, out var sourceBranch, out var targetBranch,
+                out var repositoryPath, out var error))
+        {
+            Console.Error.WriteLine(error);
+            WriteUsage();
+            return 2;
+        }
+
+        return await RunConceptPromotionAsync(sourceBranch, targetBranch, repositoryPath);
+    }
+
+    private static async Task<int> RunConceptInspectionAsync(string operation, string path)
+    {
+        using var cancellation = CreateCancellationSource();
+        try
+        {
+            var repositoryRoot = new RepositoryRootLocator().Locate(path);
+            var scan = await AnalyzeRepositoryAsync(
+                repositoryRoot,
+                cancellation.Token,
+                new TransientRepositorySnapshotStore());
+            var build = new ProjectMemoryBuilder().Build(scan.Snapshot);
+            var evidence = ReviewedConceptEvidenceContext.FromSnapshot(scan.Snapshot, build.Manifest);
+            var branchLocation = new LocalProjectMemoryStore().GetBranchLocation(
+                evidence.RepositoryId,
+                evidence.BranchKey);
+            var service = new ReviewedConceptLifecycleService();
+            var result = operation == "status"
+                ? await service.GetStatusAsync(
+                    scan.Snapshot.Repository.Name, branchLocation, evidence, cancellation.Token)
+                : await service.ValidateAsync(
+                    scan.Snapshot.Repository.Name, branchLocation, evidence, cancellation.Token);
+            WriteConceptStatus(result);
+            return operation == "status"
+                ? 0
+                : ReviewedConceptLifecycleExitCode.ForValidation(result.Status);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Command cancelled.");
+            return 130;
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or InvalidOperationException
+            or InvalidDataException)
+        {
+            Console.Error.WriteLine($"Concept inspection failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<int> RunConceptPromotionAsync(
+        string sourceBranch,
+        string targetBranch,
+        string path)
+    {
+        using var cancellation = CreateCancellationSource();
+        try
+        {
+            var repositoryRoot = new RepositoryRootLocator().Locate(path);
+            var scan = await AnalyzeRepositoryAsync(
+                repositoryRoot,
+                cancellation.Token,
+                new TransientRepositorySnapshotStore());
+            var build = new ProjectMemoryBuilder().Build(scan.Snapshot);
+            var evidence = ReviewedConceptEvidenceContext.FromSnapshot(scan.Snapshot, build.Manifest);
+            var memoryStore = new LocalProjectMemoryStore();
+            var sourceLocation = memoryStore.GetBranchLocation(
+                evidence.RepositoryId,
+                KnowledgeIdentity.CreateBranchKey(sourceBranch));
+            var targetLocation = memoryStore.GetBranchLocation(
+                evidence.RepositoryId,
+                KnowledgeIdentity.CreateBranchKey(targetBranch));
+            var result = await new ReviewedConceptLifecycleService().PromoteAsync(
+                scan.Snapshot.Repository.Name,
+                repositoryRoot,
+                sourceBranch,
+                targetBranch,
+                sourceLocation,
+                targetLocation,
+                evidence,
+                scan.Snapshot.Git,
+                cancellation.Token);
+            WriteConceptPromotion(result);
+            return result.Outcome == ReviewedConceptPromotionOutcome.Blocked ? 3 : 0;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Command cancelled.");
+            return 130;
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or InvalidOperationException
+            or InvalidDataException)
+        {
+            Console.Error.WriteLine($"Concept promotion failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static bool TryParseConceptPromotion(
+        string[] args,
+        out string sourceBranch,
+        out string targetBranch,
+        out string repositoryPath,
+        out string error)
+    {
+        sourceBranch = args.Length > 2 ? args[2] : string.Empty;
+        targetBranch = args.Length > 3 ? args[3] : string.Empty;
+        repositoryPath = Environment.CurrentDirectory;
+        error = "Usage: brain concepts promote <source-branch> <target-branch> [--repo <path>]";
+        if (args.Length is not (4 or 6)
+            || string.IsNullOrWhiteSpace(sourceBranch)
+            || string.IsNullOrWhiteSpace(targetBranch)
+            || sourceBranch.StartsWith("--", StringComparison.Ordinal)
+            || targetBranch.StartsWith("--", StringComparison.Ordinal)
+            || string.Equals(sourceBranch, targetBranch, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (args.Length == 6)
+        {
+            if (!args[4].Equals("--repo", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(args[5])
+                || args[5].StartsWith("--", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            repositoryPath = args[5];
+        }
+
+        return true;
     }
 
     private static async Task<int> RunAnalyzeAsync(string[] args)
@@ -498,15 +673,74 @@ internal static class BrainCli
         return true;
     }
 
-    private static async Task<RepositoryAnalysisResult> AnalyzeRepositoryAsync(string path, CancellationToken cancellationToken)
+    private static async Task<RepositoryAnalysisResult> AnalyzeRepositoryAsync(
+        string path,
+        CancellationToken cancellationToken,
+        IRepositorySnapshotStore? snapshotStore = null)
     {
         IRepositoryScanner scanner = new RepositoryScanner();
         var git = new GitInfoProvider();
         IReadOnlyList<ILanguageAnalyzer> analyzers = [new CSharpAnalyzer()];
-        IRepositorySnapshotStore snapshotStore = new LocalRepositorySnapshotStore();
+        snapshotStore ??= new LocalRepositorySnapshotStore();
         return await new RepositoryAnalysisEngine(scanner, git, analyzers, snapshotStore, git)
             .ScanAsync(path, cancellationToken);
     }
+
+    private static void WriteConceptStatus(ReviewedConceptLifecycleStatusResult result)
+    {
+        Console.WriteLine("Engineering Brain");
+        WriteSection("Reviewed Concepts");
+        Console.WriteLine($"Repository: {result.RepositoryName} ({result.RepositoryId})");
+        Console.WriteLine($"Branch: {result.Branch} ({result.BranchKey})");
+        Console.WriteLine($"Catalog: {result.CatalogPath}");
+        Console.WriteLine($"Status: {result.Status}");
+        Console.WriteLine($"Fingerprint: {result.CatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"Declarations: {FormatCount(result.DeclarationCount)}");
+        Console.WriteLine($"Assignments: {FormatCount(result.AssignmentCount)}");
+        Console.WriteLine($"Resolved profiles: {result.ResolvedProfileCount}");
+        Console.WriteLine($"Invalid or stale assignments: {result.InvalidOrStaleAssignmentCount}");
+        WriteConceptDiagnostics(result.Diagnostics);
+    }
+
+    private static void WriteConceptPromotion(ReviewedConceptPromotionResult result)
+    {
+        Console.WriteLine("Engineering Brain");
+        WriteSection("Reviewed Concept Promotion");
+        Console.WriteLine($"Outcome: {result.Outcome}");
+        Console.WriteLine($"Repository: {result.RepositoryName} ({result.RepositoryId})");
+        Console.WriteLine($"Source: {result.SourceBranch} ({result.SourceBranchKey})");
+        Console.WriteLine($"Target: {result.TargetBranch} ({result.TargetBranchKey})");
+        Console.WriteLine($"Source catalog: {result.SourceCatalogPath}");
+        Console.WriteLine($"Target catalog: {result.TargetCatalogPath}");
+        Console.WriteLine($"Source fingerprint: {result.SourceCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"Previous target fingerprint: {result.PreviousTargetCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"New target fingerprint: {result.NewTargetCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"Declarations: {result.DeclarationCount}");
+        Console.WriteLine($"Assignments: {result.AssignmentCount}");
+        Console.WriteLine($"Resolved profiles: {result.ActiveProfileCount}");
+        Console.WriteLine($"Recomputed assignments: {result.RecomputedAssignmentCount}");
+        Console.WriteLine($"Recomputed declaration fingerprints: {result.RecomputedDeclarationFingerprintCount}");
+        Console.WriteLine($"Rebound source references: {result.ReboundSourceReferenceCount}");
+        Console.WriteLine($"Rejected or stale assignments: {result.RejectedOrStaleAssignmentCount}");
+        WriteConceptDiagnostics(result.Diagnostics);
+    }
+
+    private static void WriteConceptDiagnostics(IReadOnlyList<ReviewedConceptDiagnostic> diagnostics)
+    {
+        if (diagnostics.Count == 0)
+        {
+            return;
+        }
+
+        WriteSection("Diagnostics");
+        foreach (var diagnostic in diagnostics)
+        {
+            Console.WriteLine(ReviewedConceptDiagnosticFormatter.Format(diagnostic));
+        }
+    }
+
+    private static string FormatCount(int? value) => value?.ToString(
+        System.Globalization.CultureInfo.InvariantCulture) ?? "unknown";
 
     private static void WritePreview(RemoteContextPreview preview)
     {
@@ -933,6 +1167,9 @@ internal static class BrainCli
         Console.WriteLine();
         Console.WriteLine("Usage: brain scan [path]");
         Console.WriteLine("       brain memory sync [path]");
+        Console.WriteLine("       brain concepts status [path]");
+        Console.WriteLine("       brain concepts validate [path]");
+        Console.WriteLine("       brain concepts promote <source-branch> <target-branch> [--repo <path>]");
         Console.WriteLine("       brain eval [repository-or-suite-path] [--update-baseline]");
         Console.WriteLine("       brain eval-live [repository-or-live-suite] [--preview | --fake-provider | --allow-remote]");
         Console.WriteLine("           [--case <id>] [--runs <1-3>] [--pricing <pricing.json>]");

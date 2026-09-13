@@ -59,3 +59,15 @@ public sealed record ReviewedConceptPromotionResult(
     int ReboundSourceReferenceCount,
     int RejectedOrStaleAssignmentCount,
     IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics);
+
+public static class ReviewedConceptLifecycleExitCode
+{
+    public static int ForValidation(ReviewedConceptResolutionStatus status) => status switch
+    {
+        ReviewedConceptResolutionStatus.Valid => 0,
+        ReviewedConceptResolutionStatus.ValidWithDiagnostics => 3,
+        ReviewedConceptResolutionStatus.Invalid => 4,
+        ReviewedConceptResolutionStatus.Absent => 5,
+        _ => 4
+    };
+}

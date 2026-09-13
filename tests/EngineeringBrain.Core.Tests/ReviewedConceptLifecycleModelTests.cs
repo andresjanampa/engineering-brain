@@ -4,6 +4,19 @@ namespace EngineeringBrain.Core.Tests;
 
 public sealed class ReviewedConceptLifecycleModelTests
 {
+    [Theory]
+    [InlineData(ReviewedConceptResolutionStatus.Valid, 0)]
+    [InlineData(ReviewedConceptResolutionStatus.ValidWithDiagnostics, 3)]
+    [InlineData(ReviewedConceptResolutionStatus.Invalid, 4)]
+    [InlineData(ReviewedConceptResolutionStatus.Absent, 5)]
+    [InlineData(ReviewedConceptResolutionStatus.Unknown, 4)]
+    public void ValidationExitCode_IsStable(
+        ReviewedConceptResolutionStatus status,
+        int expected)
+    {
+        Assert.Equal(expected, ReviewedConceptLifecycleExitCode.ForValidation(status));
+    }
+
     [Fact]
     public void PromotionResult_CarriesSourceTargetFingerprintsAndCounts()
     {

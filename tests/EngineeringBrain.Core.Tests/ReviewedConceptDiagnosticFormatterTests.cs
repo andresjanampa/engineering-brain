@@ -48,6 +48,23 @@ public sealed class ReviewedConceptDiagnosticFormatterTests
             rendered);
     }
 
+    [Fact]
+    public void Format_BlockedPromotionDiagnosticIsSingleLineAndBounded()
+    {
+        var diagnostic = new ReviewedConceptDiagnostic(
+            "RCL300",
+            AnalysisDiagnosticSeverity.Error,
+            ReviewedConceptDiagnosticScope.Assignment,
+            new string('m', 2_000) + "\nsecond line",
+            "concept\ridentity",
+            "entity\tidentity");
+
+        var rendered = ReviewedConceptDiagnosticFormatter.Format(diagnostic);
+
+        Assert.DoesNotContain(rendered, character => char.IsControl(character));
+        Assert.InRange(rendered.Length, 1, ReviewedConceptDiagnosticFormatter.MaximumRenderedLength);
+    }
+
     private static ReviewedConceptDiagnostic Diagnostic(string conceptId) => new(
         "RC200",
         AnalysisDiagnosticSeverity.Warning,
