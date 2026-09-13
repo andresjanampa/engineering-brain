@@ -423,6 +423,17 @@ public sealed class OutboundContextGuardTests
     }
 
     [Theory]
+    [InlineData("public/*gap*/class Customer\n{\n    int Value;\n}")]
+    [InlineData("class/*gap*/Customer\n{\n    int Value;\n}")]
+    [InlineData("public class/*gap*/Customer\n{\n    int Value;\n}")]
+    [InlineData("public/*gap*/void Save()\n{\n    return;\n}")]
+    [InlineData("public/* gap\n*/class Customer\n{\n    int Value;\n}")]
+    public void Inspect_BlockCommentsPreserveDeclarationTokenSeparation(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
     [InlineData("public void Save(\n    string value)\n{\n    return;\n}")]
     [InlineData("public Task<T> SaveAsync<T>(\n    T value)\n{\n    return Task.FromResult(value);\n}")]
     [InlineData("public T Save<T>(\n    T value)\n    where T : class\n{\n    return value;\n}")]

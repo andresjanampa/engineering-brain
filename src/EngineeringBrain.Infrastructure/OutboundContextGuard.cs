@@ -827,6 +827,7 @@ public sealed partial class OutboundContextGuard
 
                 if (character == '/' && next == '*')
                 {
+                    text.Append(' ');
                     _state = CFamilyLexicalState.BlockComment;
                     index++;
                     continue;
