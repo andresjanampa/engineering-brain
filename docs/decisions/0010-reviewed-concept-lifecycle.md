@@ -19,7 +19,7 @@ The target must be the current checked-out branch of the repository passed to th
 
 Promotion rebuilds the target envelope from fresh target evidence. Every EntityId must exist, every source reference is rebound, and every source, declaration, and catalog fingerprint is recomputed. The complete candidate is validated and resolved in memory before writing. One missing or stale assignment blocks the operation; no partial promotion occurs. An invalid existing target blocks replacement, and V1 has no force mode.
 
-The writer holds an exclusive sibling lock while it reads the target precondition, compares the expected fingerprint, writes and flushes a unique sibling temporary file, rechecks the precondition, verifies final Git state, and atomically replaces the target. Conflicts, cancellation, validation failures, or changed Git state leave the previous target untouched. Identical content returns `Unchanged` without a rewrite or timestamp change.
+The writer holds an exclusive sibling lock while it reads the target precondition, compares the expected fingerprint, writes and flushes a unique sibling temporary file, verifies final Git state, rechecks the target precondition, and atomically replaces the target. The lock serializes cooperating lifecycle writers, and the final fingerprint check detects non-cooperating changes during Git validation. It does not claim portable compare-and-swap protection against an arbitrary external write after the final read. Conflicts, cancellation, validation failures, or changed Git state leave the previous target untouched. Identical content returns `Unchanged` without a rewrite or timestamp change.
 
 ## Consequences
 

@@ -214,6 +214,28 @@ public sealed class LocalReviewedConceptWriterTests
     }
 
     [Fact]
+    public async Task WriteAsync_NonCooperatingMutationDuringGuardThrowsConflictAndPreservesWinner()
+    {
+        using var fixture = new TemporaryDirectory();
+        var path = new LocalReviewedConceptStore().GetPath(fixture.Path);
+        var original = ReviewedConceptTestData.Catalog();
+        await SeedAsync(path, original);
+        const string winner = "{\"winner\":true}";
+
+        await Assert.ThrowsAsync<ReviewedConceptWriteConflictException>(() =>
+            new LocalReviewedConceptWriter().WriteAsync(
+                fixture.Path,
+                ChangedCatalog("replacement"),
+                ReviewedConceptSerializer.CreateCatalogFingerprint(original),
+                async token => await File.WriteAllTextAsync(path, winner, token)));
+
+        Assert.Equal(winner, await File.ReadAllTextAsync(path));
+        Assert.Empty(TemporaryFiles(path));
+        await using var releasedLock = new FileStream(
+            path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    }
+
+    [Fact]
     public async Task WriteAsync_RejectsEscapingBranchLocation()
     {
         await Assert.ThrowsAnyAsync<ArgumentException>(() =>

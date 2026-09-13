@@ -115,7 +115,7 @@ brain concepts promote <source-branch> <target-branch> [--repo <path>]
 
 The target checkout must already be on `target-branch`, have a stable HEAD, and be clean. To target another checkout, pass its path with `--repo`; the command never checks out, creates, switches, or fetches branches. Promotion reads the source catalog as reviewed semantic decisions, then rebinds every assignment to fresh target evidence and recomputes source references and fingerprints. One unprovable assignment blocks the entire operation, so there is no partial promotion. An existing invalid target also blocks replacement.
 
-Only the external `semantic/reviewed-concepts.json` artifact is mutable. `LocalReviewedConceptWriter` is the sole lifecycle mutation boundary; it uses an exclusive sibling lock, an expected-content precondition, a flushed temporary file, and atomic replacement. Identical promotion returns `Unchanged` without rewriting the file. Normal analysis and Project Memory synchronization remain read-only with respect to reviewed concepts.
+Only the external `semantic/reviewed-concepts.json` artifact is mutable. `LocalReviewedConceptWriter` is the sole lifecycle mutation boundary; it uses an exclusive sibling lock, a flushed temporary file, a final expected-content check after repository validation, and atomic replacement. The lock serializes cooperating lifecycle writers; the final check detects non-cooperating changes during validation without claiming portable compare-and-swap protection after that read. Identical promotion returns `Unchanged` without rewriting the file. Normal analysis and Project Memory synchronization remain read-only with respect to reviewed concepts.
 
 ## Analyze an initiative
 

@@ -87,9 +87,9 @@ public sealed class LocalReviewedConceptWriter
                 stream.Flush(flushToDisk: true);
             }
 
+            await validateBeforeCommit(cancellationToken);
             var finalFingerprint = await ReadFingerprintAsync(targetPath, cancellationToken);
             EnsureExpectedFingerprint(finalFingerprint, expectedCurrentFingerprint);
-            await validateBeforeCommit(cancellationToken);
             File.Move(tempPath, targetPath, overwrite: true);
 
             return new ReviewedConceptWriteResult(

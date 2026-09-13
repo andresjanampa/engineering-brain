@@ -357,6 +357,26 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
+    public async Task PromoteAsync_NonCooperatingMutationDuringFinalGuardReturnsConflict()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+        const string winner = "{\"winner\":true}";
+
+        var result = await fixture.PromoteAsync(gitInfo: new MutatingGitInfoProvider(
+            fixture.TargetPath,
+            winner,
+            new GitInfo(true, "main", "target-head", null, true)));
+
+        Assert.Equal(winner, await File.ReadAllTextAsync(fixture.TargetPath));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(fixture.TargetPath)!, ".*.tmp"));
+        AssertBlocked(result, "RCL401");
+        await using var releasedLock = new FileStream(
+            fixture.TargetPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    }
+
+    [Fact]
     public async Task PromoteAsync_LockTimeoutReturnsBoundedDiagnostic()
     {
         using var fixture = new PromotionFixture();
@@ -848,6 +868,20 @@ public sealed class ReviewedConceptLifecycleServiceTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(info);
+        }
+    }
+
+    private sealed class MutatingGitInfoProvider(
+        string targetPath,
+        string replacement,
+        GitInfo info) : IGitInfoProvider
+    {
+        public async Task<GitInfo> GetInfoAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default)
+        {
+            await File.WriteAllTextAsync(targetPath, replacement, cancellationToken);
+            return info;
         }
     }
 

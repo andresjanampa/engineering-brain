@@ -501,11 +501,12 @@ While holding the lock:
 2. Require absence when `expectedCurrentFingerprint` is null; otherwise require exact ordinal equality.
 3. Serialize canonically and return `Unchanged` before writing when hashes match.
 4. Write UTF-8 without BOM to a uniquely named sibling temp file opened with `FileMode.CreateNew` and `FileOptions.WriteThrough`.
-5. Flush the stream completely and recheck the expected target fingerprint under the same lock.
-6. Await `validateBeforeCommit` while still holding the lock, then immediately call `File.Move(temp, target, overwrite: true)`.
-7. Delete only this invocation's temp file in `finally`.
+5. Flush the stream completely.
+6. Await `validateBeforeCommit` while still holding the lock.
+7. Recheck the expected target fingerprint under the same lock, then immediately call `File.Move(temp, target, overwrite: true)`.
+8. Delete only this invocation's temp file in `finally`.
 
-Do not expose delete, arbitrary path write, or general CRUD methods. The lock protects all cooperating production writers; the second fingerprint check detects a non-cooperating write before replacement.
+Do not expose delete, arbitrary path write, or general CRUD methods. The lock protects all cooperating production writers; the final fingerprint check detects a non-cooperating write during validation before replacement. Do not claim portable compare-and-swap protection against an arbitrary external write after that final read.
 
 - [ ] **Step 4: Run writer and store tests**
 
@@ -865,7 +866,7 @@ Use bounded lifecycle diagnostic codes in a dedicated `RCL` range while retainin
 - `RCL400`: target catalog is invalid.
 - `RCL401`: lock or expected-fingerprint conflict.
 
-Check initial `analyzedGit` before source loading. Pass a `validateBeforeCommit` callback to `_writer.WriteAsync`; the writer invokes it while holding the catalog lock after temp-file flush and immediately before atomic move. The callback calls injected `IGitInfoProvider.GetInfoAsync(repositoryRoot)` and requires the same target branch, same HEAD, and `IsWorkingTreeClean == true`. Define an internal `ReviewedConceptTargetChangedException : InvalidOperationException` in `ReviewedConceptLifecycleService.cs`; the callback throws it with a fixed safe message when Git state differs. Catch `ReviewedConceptWriteConflictException` as `RCL401` and `ReviewedConceptTargetChangedException` as `RCL201`; propagate cancellation and unrelated operational I/O failures to the CLI's operational path.
+Check initial `analyzedGit` before source loading. Pass a `validateBeforeCommit` callback to `_writer.WriteAsync`; the writer invokes it while holding the catalog lock after temp-file flush, then rechecks the expected target fingerprint immediately before atomic move. The callback calls injected `IGitInfoProvider.GetInfoAsync(repositoryRoot)` and requires the same target branch, same HEAD, and `IsWorkingTreeClean == true`. Define an internal `ReviewedConceptTargetChangedException : InvalidOperationException` in `ReviewedConceptLifecycleService.cs`; the callback throws it with a fixed safe message when Git state differs. Catch `ReviewedConceptWriteConflictException` as `RCL401` and `ReviewedConceptTargetChangedException` as `RCL201`; propagate cancellation and unrelated operational I/O failures to the CLI's operational path.
 
 Source `ValidWithDiagnostics` is blocking for promotion even though runtime may use valid siblings. Promotion cannot silently drop reviewed declarations or assignments.
 
@@ -1207,7 +1208,7 @@ Expected: no whitespace errors, no untracked scratch/build artifacts, and a clea
 - Target envelope fields and assignment evidence are created only from target evidence.
 - One failed assignment blocks the writer; no valid sibling is silently promoted alone.
 - Existing invalid target catalogs block before mutation.
-- The exclusive lock spans precondition read, comparison, flush, second comparison, and atomic move.
+- The exclusive lock spans precondition read, comparison, flush, final Git validation, second comparison, and atomic move.
 - `Unchanged` performs no write and preserves timestamp.
 - Result type names and signatures are consistent across all tasks.
 - Runtime reader remains read-only and Project Memory/retrieval files remain untouched.
