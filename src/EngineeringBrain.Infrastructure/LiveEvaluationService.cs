@@ -12,7 +12,6 @@ public sealed class LiveEvaluationService
     private readonly PolicyComplianceValidator _policyValidator;
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
-    private readonly OutboundContextGuard _guard;
     private readonly OutboundRequestGate _gate;
     private readonly LiveEvaluationMetricCalculator _metrics;
     private readonly LocalLiveEvaluationStore _store;
@@ -25,7 +24,6 @@ public sealed class LiveEvaluationService
         PolicyComplianceValidator? policyValidator = null,
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
-        OutboundContextGuard? guard = null,
         OutboundRequestGate? gate = null,
         LiveEvaluationMetricCalculator? metrics = null,
         LocalLiveEvaluationStore? store = null,
@@ -37,8 +35,7 @@ public sealed class LiveEvaluationService
         _contextBuilder = contextBuilder ?? new InitiativeContextBuilder(estimator: _estimator, budget: _budget);
         _validator = validator ?? new AnalysisEvidenceValidator();
         _policyValidator = policyValidator ?? new PolicyComplianceValidator();
-        _guard = guard ?? new OutboundContextGuard();
-        _gate = gate ?? new OutboundRequestGate(_guard);
+        _gate = gate ?? new OutboundRequestGate();
         _metrics = metrics ?? new LiveEvaluationMetricCalculator();
         _store = store ?? new LocalLiveEvaluationStore();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
@@ -191,18 +188,12 @@ public sealed class LiveEvaluationService
         LivePolicyMetrics? policyMetrics = null;
         var usage = new List<ReasoningCallUsage>();
         var security = new List<OutboundValidationResult>();
+        var outboundAssessments = new List<OutboundPolicyAssessment>();
         var failedEstimate = 0;
         try
         {
             initiative = await File.ReadAllTextAsync(initiativePath, cancellationToken);
             initiativeHash = LocalInitiativeAnalysisStore.CreateContentHash(initiative);
-            var call1Security = _guard.ValidateInitiative(initiative);
-            security.Add(call1Security);
-            if (!call1Security.IsValid)
-                return Result(LiveEvaluationExecutionStatus.SecurityBlocked, "SecurityBlocked",
-                    $"CALL #1 blocked: {string.Join(", ", call1Security.DiagnosticCodes)}");
-
-            var provider = providerFactory(item, runNumber);
             var call1Estimate = _estimator.Estimate(initiative) + _estimator.Estimate(InitiativeAnalysisPrompts.Understanding);
             if (call1Estimate > _budget.MaximumInitiativeInputTokens)
                 throw new InvalidDataException("Live initiative exceeds the configured input limit.");
@@ -214,9 +205,11 @@ public sealed class LiveEvaluationService
                 initiative,
                 _budget.InitiativeOutputTokens,
                 call1Estimate);
+            var approvedCall1 = Approve(call1Request);
+            var provider = providerFactory(item, runNumber);
             var call1 = await InvokeAsync<InitiativeUnderstanding>(
                 provider,
-                _gate.ApproveExact(call1Request),
+                approvedCall1,
                 cancellationToken);
             usage.Add(call1.Usage);
             understanding = call1.Value;
@@ -243,12 +236,6 @@ public sealed class LiveEvaluationService
                 retrieval.Relations.Count,
                 retrieval.Components.Count,
                 context.PrunedNotePaths.Count);
-            var call2Security = _guard.Validate(context);
-            security.Add(call2Security);
-            if (!call2Security.IsValid)
-                return Result(LiveEvaluationExecutionStatus.SecurityBlocked, "SecurityBlocked",
-                    $"CALL #2 blocked: {string.Join(", ", call2Security.DiagnosticCodes)}");
-
             var call2Estimate = context.EstimatedTokens + _estimator.Estimate(InitiativeAnalysisPrompts.ArchitectureAnalysis);
             if (call2Estimate > _budget.MaximumReasoningInputTokens)
                 throw new InvalidDataException("Live reasoning context exceeds the configured input limit.");
@@ -260,9 +247,10 @@ public sealed class LiveEvaluationService
                 context.Content,
                 _budget.ReasoningOutputTokens,
                 call2Estimate);
+            var approvedCall2 = Approve(call2Request, context);
             var call2 = await InvokeAsync<InitiativeAnalysis>(
                 provider,
-                _gate.ApproveExact(call2Request, context),
+                approvedCall2,
                 cancellationToken);
             usage.Add(call2.Usage);
             analysis = call2.Value;
@@ -277,6 +265,13 @@ public sealed class LiveEvaluationService
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (OutboundSecurityException exception)
+        {
+            return Result(
+                LiveEvaluationExecutionStatus.SecurityBlocked,
+                exception.Code,
+                exception.Message);
         }
         catch (ReasoningProviderException exception)
         {
@@ -327,7 +322,43 @@ public sealed class LiveEvaluationService
             security.ToArray(),
             category,
             LocalLiveEvaluationStore.Redact(error),
-            new LiveHumanReview(null, null, null, null, null, null, null));
+            new LiveHumanReview(null, null, null, null, null, null, null),
+            outboundAssessments.ToArray());
+
+        ApprovedReasoningRequest Approve(ReasoningRequest request, InitiativeContext? context = null)
+        {
+            try
+            {
+                var approved = _gate.ApproveExact(request, context);
+                outboundAssessments.Add(approved.Assessment);
+                security.Add(ToLegacyValidation(approved.Assessment));
+                return approved;
+            }
+            catch (OutboundSecurityException exception)
+            {
+                outboundAssessments.Add(exception.Assessment);
+                security.Add(ToLegacyValidation(exception.Assessment));
+                throw;
+            }
+        }
+    }
+
+    private static OutboundValidationResult ToLegacyValidation(OutboundPolicyAssessment assessment)
+    {
+        var blocked = assessment.Results
+            .Where(result => result.Outcome == OutboundPolicyOutcome.Blocked)
+            .ToArray();
+        return new OutboundValidationResult(
+            assessment.IsAllowed,
+            Count(PolicyContentScope.SourceBodies),
+            Count(PolicyContentScope.Secrets),
+            Count(PolicyContentScope.AbsoluteLocalPaths),
+            Count(PolicyContentScope.RawSnapshot),
+            assessment.Diagnostics.ToArray());
+
+        int Count(PolicyContentScope category) => blocked
+            .Where(result => result.Category == category)
+            .Sum(result => result.FindingCount);
     }
 
     private static async Task<ReasoningResult<T>> InvokeAsync<T>(

@@ -8,6 +8,141 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class LiveEvaluationTests
 {
     [Fact]
+    public async Task ExecuteAsync_RecordsExactAssessmentForEveryProviderCall()
+    {
+        using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.RunAsync(FakeFactory(fixture));
+
+        var item = Assert.Single(result.Cases);
+        Assert.Equal(2, item.OutboundPolicyAssessments.Count);
+        Assert.All(item.OutboundPolicyAssessments, assessment =>
+        {
+            Assert.Equal(OutboundAssessmentKind.Exact, assessment.AssessmentKind);
+            Assert.True(assessment.IsAllowed);
+            Assert.NotNull(assessment.PayloadFingerprint);
+        });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BlockedCallOneNeverCreatesProvider()
+    {
+        const string secret = "fixture-live-call-one-secret";
+        using var fixture = await Fixture.CreateAsync(initiative: secret);
+        var providersCreated = 0;
+        var service = LiveService(fixture, CreateGate(secret), "blocked-call-one");
+
+        var result = await service.RunAsync(
+            LiveEvaluationPlanner.Create(fixture.Suite),
+            fixture.SuitePath,
+            fixture.Memory,
+            "Fake",
+            (_, _) =>
+            {
+                providersCreated++;
+                return new CountingProvider();
+            },
+            "model-a",
+            "model-b",
+            "low",
+            "medium");
+
+        Assert.Equal(0, providersCreated);
+        var blocked = Assert.Single(result.Cases);
+        Assert.Equal(LiveEvaluationExecutionStatus.SecurityBlocked, blocked.Status);
+        Assert.Single(blocked.OutboundPolicyAssessments);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BlockedCallTwoDoesNotInvokeSecondCall()
+    {
+        const string secret = "fixture-live-call-two-secret";
+        using var fixture = await Fixture.CreateAsync();
+        var memory = await AddRootNoteTextAsync(fixture.Memory, secret);
+        var provider = new ScriptedProvider(
+            fixture.Suite.Cases[0].GoldenUnderstanding,
+            InitiativeAnalysisTestData.Analysis());
+        var service = LiveService(fixture, CreateGate(secret), "blocked-call-two");
+
+        var result = await service.RunAsync(
+            LiveEvaluationPlanner.Create(fixture.Suite),
+            fixture.SuitePath,
+            memory,
+            "Fake",
+            (_, _) => provider,
+            "model-a",
+            "model-b",
+            "low",
+            "medium");
+
+        Assert.Equal(1, provider.Calls);
+        var blocked = Assert.Single(result.Cases);
+        Assert.Equal(LiveEvaluationExecutionStatus.SecurityBlocked, blocked.Status);
+        Assert.Equal(2, blocked.OutboundPolicyAssessments.Count);
+        Assert.True(blocked.OutboundPolicyAssessments[0].IsAllowed);
+        Assert.False(blocked.OutboundPolicyAssessments[1].IsAllowed);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesSameCatalogGuardAndEvaluatorAsNormalAnalysis()
+    {
+        const string secret = "fixture-shared-gate-secret";
+        using var fixture = await Fixture.CreateAsync(initiative: secret);
+        var gate = CreateGate(secret);
+        var normalProvider = new CountingProvider();
+        var normalException = await Assert.ThrowsAsync<OutboundSecurityException>(() =>
+            new InitiativeAnalysisService(normalProvider, outboundGate: gate).AnalyzeAsync(
+                new InitiativeAnalysisRequest(
+                    "initiative.md",
+                    secret,
+                    fixture.Memory,
+                    "model-a",
+                    "model-b",
+                    PersistResult: false)));
+        var live = await LiveService(fixture, gate, "shared-gate").RunAsync(
+            LiveEvaluationPlanner.Create(fixture.Suite),
+            fixture.SuitePath,
+            fixture.Memory,
+            "Fake",
+            (_, _) => new CountingProvider(),
+            "model-a",
+            "model-b",
+            "low",
+            "medium");
+
+        var liveAssessment = Assert.Single(Assert.Single(live.Cases).OutboundPolicyAssessments);
+        Assert.Equal(
+            normalException.Assessment.Results.Select(result => (result.PolicyId, result.Outcome)),
+            liveAssessment.Results.Select(result => (result.PolicyId, result.Outcome)));
+    }
+
+    [Fact]
+    public void Aggregate_CountsCompleteRepositoryAndAllExistingCategories()
+    {
+        var findings = SystemSecurityPolicyCatalog.Definitions.Select(definition =>
+            new OutboundInspectionFinding(
+                definition.Category,
+                OutboundInspectionReasonCode.CompleteRepositoryPayload,
+                OutboundTriggerKind.PayloadKind,
+                1,
+                false)).ToArray();
+        var assessment = new OutboundPolicyEvaluator().Evaluate(OutboundAssessmentKind.Exact, null, findings);
+        var result = SuccessfulResult("blocked", 1, [], []) with
+        {
+            Status = LiveEvaluationExecutionStatus.SecurityBlocked,
+            OutboundPolicyAssessments = [assessment]
+        };
+
+        var aggregate = LiveEvaluationMetricCalculator.Aggregate([result]);
+
+        Assert.Equal(1, aggregate.CompleteRepositoryOutbound);
+        Assert.Equal(1, aggregate.RawSnapshotOutbound);
+        Assert.Equal(1, aggregate.SourceBodyOutbound);
+        Assert.Equal(1, aggregate.SecretOutbound);
+        Assert.Equal(1, aggregate.AbsolutePathOutbound);
+    }
+
+    [Fact]
     public async Task RunAsync_UsesSameReviewedProfilesForGoldenAndLiveRetrieval()
     {
         var item = Case("concept") with
@@ -848,6 +983,36 @@ public sealed class LiveEvaluationTests
     private static Func<LiveEvaluationCase, int, IReasoningProvider> FakeFactory(Fixture fixture) =>
         (item, run) => new FakeLiveReasoningProvider(item, fixture.Memory.SourceSnapshot, run, "low", "medium");
 
+    private static LiveEvaluationService LiveService(
+        Fixture fixture,
+        OutboundRequestGate gate,
+        string directory) => new(
+        gate: gate,
+        store: new LocalLiveEvaluationStore(Path.Combine(fixture.Root, directory)),
+        clock: () => new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero));
+
+    private static OutboundRequestGate CreateGate(params string[] secrets) => new(
+        new OutboundContextGuard(new FixedSecretValueSource(secrets)),
+        new OutboundPolicyEvaluator());
+
+    private static async Task<ProjectMemorySyncResult> AddRootNoteTextAsync(
+        ProjectMemorySyncResult memory,
+        string text)
+    {
+        var rootNote = memory.Manifest.Notes.Single(note => note.Kind == KnowledgeNoteKind.RootIndex);
+        var path = Path.Combine(memory.Location, rootNote.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var content = await File.ReadAllTextAsync(path) + Environment.NewLine + text;
+        await File.WriteAllTextAsync(path, content);
+        var updated = rootNote with { ContentHash = KnowledgeIdentity.ContentHash(content) };
+        return memory with
+        {
+            Manifest = memory.Manifest with
+            {
+                Notes = memory.Manifest.Notes.Select(note => note.Identity == rootNote.Identity ? updated : note).ToArray()
+            }
+        };
+    }
+
     private static LiveEvaluationSuite Suite(IReadOnlyList<LiveEvaluationCase> cases) => new(2, "live-suite", "safe", cases);
 
     private static LiveEvaluationCase Case(string id) => new(
@@ -944,7 +1109,7 @@ public sealed class LiveEvaluationTests
             caseId, run, LiveEvaluationExecutionStatus.Succeeded, "initiative.md", "hash",
             Understanding("business"), null, null, null, null, analysis,
             governed.Recommendations, governed.Outcome, null, null, [], [], null, null,
-            new LiveHumanReview(null, null, null, null, null, null, null));
+            new LiveHumanReview(null, null, null, null, null, null, null), []);
     }
 
     private static string FindRepositoryFile(params string[] parts)
@@ -1026,13 +1191,20 @@ public sealed class LiveEvaluationTests
     private sealed class ScriptedProvider(InitiativeUnderstanding understanding, InitiativeAnalysis analysis) : IReasoningProvider
     {
         public string Name => "Fake";
+        public int Calls { get; private set; }
         public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ApprovedReasoningRequest request, CancellationToken cancellationToken = default)
         {
+            Calls++;
             var raw = request.Request;
             object value = typeof(T) == typeof(InitiativeUnderstanding) ? understanding : analysis;
             return Task.FromResult(new ReasoningResult<T>((T)value,
                 new ReasoningCallUsage(raw.Stage, Name, raw.Model, raw.EstimatedInputTokens,
                     raw.EstimatedInputTokens, 0, 10, 1, 0)));
         }
+    }
+
+    private sealed class FixedSecretValueSource(params string[] values) : IOutboundSecretValueSource
+    {
+        public IReadOnlySet<string> GetValues() => values.ToHashSet(StringComparer.Ordinal);
     }
 }

@@ -197,7 +197,8 @@ public sealed record LiveEvaluationCaseResult(
     IReadOnlyList<OutboundValidationResult> SecurityChecks,
     string? ErrorCategory,
     string? ErrorMessage,
-    LiveHumanReview HumanReview);
+    LiveHumanReview HumanReview,
+    IReadOnlyList<OutboundPolicyAssessment> OutboundPolicyAssessments);
 
 public sealed record LiveUsageSummary(
     int LogicalCalls,
@@ -241,6 +242,7 @@ public sealed record LiveEvaluationAggregate(
     double AverageContextTokens,
     double MedianContextTokens,
     int MaximumContextTokens,
+    int CompleteRepositoryOutbound,
     int SourceBodyOutbound,
     int SecretOutbound,
     int AbsolutePathOutbound,

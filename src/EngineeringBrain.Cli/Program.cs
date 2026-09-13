@@ -590,7 +590,10 @@ internal static class BrainCli
             IReasoningProvider Factory(LiveEvaluationCase item, int runNumber) => options.FakeProvider
                 ? new FakeLiveReasoningProvider(item, memory.SourceSnapshot, runNumber, interpretationEffort, analysisEffort)
                 : new OpenAIReasoningProvider(apiKey!, providerOptions);
-            var result = await new LiveEvaluationService().RunAsync(
+            var outboundGate = new OutboundRequestGate(
+                new OutboundContextGuard(new EnvironmentOutboundSecretValueSource()),
+                new OutboundPolicyEvaluator());
+            var result = await new LiveEvaluationService(gate: outboundGate).RunAsync(
                 plan, suitePath, memory, reviewedConcepts, providerName, Factory,
                 options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, pricing, cancellation.Token);
