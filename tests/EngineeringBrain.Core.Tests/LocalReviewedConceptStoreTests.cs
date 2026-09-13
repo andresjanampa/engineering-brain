@@ -30,6 +30,7 @@ public sealed class LocalReviewedConceptStoreTests
 
         Assert.Equal(ReviewedConceptLoadStatus.Invalid, result.Status);
         Assert.Null(result.Catalog);
+        Assert.Equal(KnowledgeIdentity.ContentHash("{not-json"), result.ContentHash);
         Assert.Single(result.Diagnostics, item => item.Code == "RC001");
         Assert.DoesNotContain("not-json", result.Diagnostics[0].Message, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.Path, result.Diagnostics[0].Message, StringComparison.OrdinalIgnoreCase);
@@ -54,7 +55,7 @@ public sealed class LocalReviewedConceptStoreTests
 
         Assert.Equal(ReviewedConceptLoadStatus.Invalid, result.Status);
         Assert.Null(result.Catalog);
-        Assert.Empty(result.ContentHash ?? string.Empty);
+        Assert.Equal(KnowledgeIdentity.ContentHash(json), result.ContentHash);
         Assert.Single(result.Diagnostics, item => item.Code == "RC001");
     }
 

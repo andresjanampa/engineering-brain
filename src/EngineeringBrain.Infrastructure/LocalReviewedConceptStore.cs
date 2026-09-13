@@ -35,14 +35,16 @@ public sealed class LocalReviewedConceptStore
                 []);
         }
 
+        string? contentHash = null;
         try
         {
             var json = await File.ReadAllTextAsync(path, cancellationToken);
+            contentHash = KnowledgeIdentity.ContentHash(json);
             var catalog = ReviewedConceptSerializer.Deserialize(json);
             return new ReviewedConceptLoadResult(
                 ReviewedConceptLoadStatus.Loaded,
                 path,
-                KnowledgeIdentity.ContentHash(json),
+                contentHash,
                 catalog,
                 []);
         }
@@ -57,7 +59,7 @@ public sealed class LocalReviewedConceptStore
             return new ReviewedConceptLoadResult(
                 ReviewedConceptLoadStatus.Invalid,
                 path,
-                null,
+                contentHash,
                 null,
                 [new ReviewedConceptDiagnostic(
                     "RC001",

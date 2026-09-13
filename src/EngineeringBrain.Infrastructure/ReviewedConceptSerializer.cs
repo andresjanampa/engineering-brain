@@ -41,6 +41,9 @@ public static class ReviewedConceptSerializer
         }
     }
 
+    public static string CreateCatalogFingerprint(ReviewedConceptCatalog catalog) =>
+        KnowledgeIdentity.ContentHash(Serialize(catalog));
+
     private static bool HasCompleteStructure(ReviewedConceptCatalog catalog) =>
         catalog.RepositoryId is not null
         && catalog.Branch is not null
