@@ -5,6 +5,101 @@ namespace EngineeringBrain.Core.Tests;
 
 public sealed class ReviewedConceptValidatorTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ValidateIntegrity_SchemaOneAndSchemaTwoAreSupported(int schemaVersion)
+    {
+        var catalog = ReviewedConceptTestData.Catalog() with { SchemaVersion = schemaVersion };
+        if (schemaVersion == 2)
+        {
+            catalog = catalog with { IdentityMigrations = [WithFingerprint(Migration())] };
+        }
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(
+            catalog,
+            new ReviewedConceptCatalogIdentity(catalog.RepositoryId, catalog.Branch, catalog.BranchKey));
+
+        Assert.True(result.CatalogIsValid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("missing-old")]
+    [InlineData("missing-new")]
+    [InlineData("same-identity")]
+    [InlineData("missing-reviewer")]
+    [InlineData("missing-previous-fingerprint")]
+    [InlineData("absolute-destination-reference")]
+    [InlineData("bad-fingerprint")]
+    public void ValidateIntegrity_InvalidIdentityMigrationIsCatalogInvalid(string failure)
+    {
+        var migration = WithFingerprint(Migration());
+        migration = failure switch
+        {
+            "missing-old" => migration with { OldEntityId = null! },
+            "missing-new" => migration with { NewEntityId = null! },
+            "same-identity" => migration with { NewEntityId = migration.OldEntityId },
+            "missing-reviewer" => migration with { Review = migration.Review with { Reviewer = null! } },
+            "missing-previous-fingerprint" => migration with { PreviousCatalogFingerprint = null! },
+            "absolute-destination-reference" => migration with { DestinationSourceReference = "C:\\source.cs:1" },
+            "bad-fingerprint" => migration with { Fingerprint = "wrong" },
+            _ => throw new InvalidOperationException()
+        };
+        var catalog = ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [migration]
+        };
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(
+            catalog,
+            new ReviewedConceptCatalogIdentity(catalog.RepositoryId, catalog.Branch, catalog.BranchKey));
+
+        Assert.False(result.CatalogIsValid);
+        Assert.Empty(result.Declarations);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC111");
+        Assert.All(result.Diagnostics, item => Assert.Single(item.Message.Split('\n')));
+    }
+
+    [Fact]
+    public void ValidateIntegrity_DuplicateMigrationFingerprintIsInvalid()
+    {
+        var migration = WithFingerprint(Migration());
+        var catalog = ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [migration, migration]
+        };
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(
+            catalog,
+            new ReviewedConceptCatalogIdentity(catalog.RepositoryId, catalog.Branch, catalog.BranchKey));
+
+        Assert.False(result.CatalogIsValid);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC112");
+    }
+
+    [Fact]
+    public void ValidateIntegrity_UnsortedAffectedConceptsCanonicalizeWithoutChangingMeaning()
+    {
+        var first = WithFingerprint(Migration(["concept-a", "concept-b"]));
+        var second = WithFingerprint(Migration(["concept-b", "concept-a"]));
+        var catalog = ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [second]
+        };
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(
+            catalog,
+            new ReviewedConceptCatalogIdentity(catalog.RepositoryId, catalog.Branch, catalog.BranchKey));
+
+        Assert.Equal(first.Fingerprint, second.Fingerprint);
+        Assert.True(result.CatalogIsValid);
+        Assert.Empty(result.Diagnostics);
+    }
+
     [Fact]
     public void ValidateIntegrity_UsesExpectedSourceIdentityWithoutResolvingSourceCode()
     {
@@ -334,4 +429,33 @@ public sealed class ReviewedConceptValidatorTests
         Assert.DoesNotContain(result.Declarations, item => item.ConceptId == "provider-boundary");
         Assert.Single(result.Declarations.Single(item => item.ConceptId == "valid-concept").Assignments);
     }
+
+    private static ReviewedConceptIdentityMigration Migration(
+        IReadOnlyList<string>? affectedConceptIds = null)
+    {
+        var catalog = ReviewedConceptTestData.Catalog();
+        var evidence = ReviewedConceptTestData.Evidence();
+        var component = evidence.Components["entity:business-service"];
+        return new ReviewedConceptIdentityMigration(
+            catalog.RepositoryId,
+            catalog.Branch,
+            catalog.BranchKey,
+            "entity:old",
+            component.EntityId,
+            affectedConceptIds ?? [catalog.Declarations[0].ConceptId],
+            "previous-catalog",
+            $"{component.RelativePath}:{component.StartLine}",
+            component.SourceFingerprint,
+            new ReviewedConceptReview(
+                "reviewer",
+                1,
+                new DateTimeOffset(2026, 9, 13, 12, 0, 0, TimeSpan.Zero)),
+            "pending");
+    }
+
+    private static ReviewedConceptIdentityMigration WithFingerprint(
+        ReviewedConceptIdentityMigration migration) => migration with
+        {
+            Fingerprint = ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(migration)
+        };
 }

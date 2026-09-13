@@ -52,6 +52,12 @@ public sealed partial class ReviewedConceptValidator
             return new ReviewedConceptValidationResult(false, [], diagnostics);
         }
 
+        diagnostics.AddRange(ValidateIdentityMigrations(catalog));
+        if (diagnostics.Count > 0)
+        {
+            return new ReviewedConceptValidationResult(false, [], diagnostics);
+        }
+
         return ValidateDeclarationsAndAssignments(catalog, diagnostics);
     }
 
@@ -115,9 +121,12 @@ public sealed partial class ReviewedConceptValidator
                 || catalog.BranchKey is null
                 || catalog.SourceAnalyzerVersion is null
                 || catalog.VocabularyVersion is null
+                || catalog.IdentityMigrations is null
                 || catalog.Declarations is null,
             "RC108", "Reviewed concept catalog structure is incomplete.", diagnostics);
-        AddCatalogError(catalog.SchemaVersion != ReviewedConceptSerializer.CurrentSchemaVersion, "RC100",
+        AddCatalogError(catalog.SchemaVersion < ReviewedConceptSerializer.MinimumSupportedSchemaVersion
+                || catalog.SchemaVersion > ReviewedConceptSerializer.CurrentSchemaVersion,
+            "RC100",
             "Reviewed concept schema is incompatible.", diagnostics);
         AddCatalogError(!string.Equals(catalog.RepositoryId, expected.RepositoryId, StringComparison.Ordinal), "RC101",
             "Reviewed concept repository identity does not match current evidence.", diagnostics);
@@ -136,6 +145,82 @@ public sealed partial class ReviewedConceptValidator
             "Reviewed concept historical snapshot schema is invalid.", diagnostics);
         AddCatalogError(string.IsNullOrWhiteSpace(catalog.SourceAnalyzerVersion), "RC110",
             "Reviewed concept historical analyzer metadata is invalid.", diagnostics);
+        return diagnostics;
+    }
+
+    private static IReadOnlyList<ReviewedConceptDiagnostic> ValidateIdentityMigrations(
+        ReviewedConceptCatalog catalog)
+    {
+        var diagnostics = new List<ReviewedConceptDiagnostic>();
+        if (catalog.SchemaVersion == 1 && catalog.IdentityMigrations.Count > 0)
+        {
+            AddCatalogError(true, "RC111",
+                "Reviewed concept identity migration history is invalid.", diagnostics);
+            return diagnostics;
+        }
+
+        var validFingerprints = new List<string>();
+        foreach (var migration in catalog.IdentityMigrations
+                     .OrderBy(item => item?.OldEntityId, StringComparer.Ordinal)
+                     .ThenBy(item => item?.NewEntityId, StringComparer.Ordinal))
+        {
+            if (migration is null
+                || migration.RepositoryId is null
+                || migration.Branch is null
+                || migration.BranchKey is null
+                || migration.OldEntityId is null
+                || migration.NewEntityId is null
+                || migration.AffectedConceptIds is null
+                || migration.AffectedConceptIds.Any(item => item is null)
+                || migration.PreviousCatalogFingerprint is null
+                || migration.DestinationSourceReference is null
+                || migration.DestinationSourceFingerprint is null
+                || migration.Review is null
+                || migration.Review.Reviewer is null
+                || migration.Fingerprint is null)
+            {
+                AddCatalogError(true, "RC111",
+                    "Reviewed concept identity migration history is invalid.", diagnostics);
+                continue;
+            }
+
+            var invalid = string.IsNullOrWhiteSpace(migration.RepositoryId)
+                || string.IsNullOrWhiteSpace(migration.Branch)
+                || !string.Equals(
+                    migration.BranchKey,
+                    KnowledgeIdentity.CreateBranchKey(migration.Branch),
+                    StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(migration.OldEntityId)
+                || string.IsNullOrWhiteSpace(migration.NewEntityId)
+                || string.Equals(migration.OldEntityId, migration.NewEntityId, StringComparison.Ordinal)
+                || migration.AffectedConceptIds.Count == 0
+                || migration.AffectedConceptIds.Any(string.IsNullOrWhiteSpace)
+                || migration.AffectedConceptIds.Distinct(StringComparer.Ordinal).Count()
+                    != migration.AffectedConceptIds.Count
+                || string.IsNullOrWhiteSpace(migration.PreviousCatalogFingerprint)
+                || !IsNormalizedRelativeSourceReference(migration.DestinationSourceReference)
+                || string.IsNullOrWhiteSpace(migration.DestinationSourceFingerprint)
+                || string.IsNullOrWhiteSpace(migration.Review.Reviewer)
+                || migration.Review.Version <= 0
+                || migration.Review.ReviewedAtUtc.Offset != TimeSpan.Zero
+                || !string.Equals(
+                    migration.Fingerprint,
+                    ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(migration),
+                    StringComparison.Ordinal);
+            if (invalid)
+            {
+                AddCatalogError(true, "RC111",
+                    "Reviewed concept identity migration history is invalid.", diagnostics);
+                continue;
+            }
+
+            validFingerprints.Add(migration.Fingerprint);
+        }
+
+        AddCatalogError(validFingerprints
+                .GroupBy(item => item, StringComparer.Ordinal)
+                .Any(group => group.Count() > 1),
+            "RC112", "Reviewed concept identity migration history contains duplicates.", diagnostics);
         return diagnostics;
     }
 
