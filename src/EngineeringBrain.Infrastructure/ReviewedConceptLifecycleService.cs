@@ -38,6 +38,169 @@ public sealed class ReviewedConceptLifecycleService
         CancellationToken cancellationToken = default) =>
         InspectAsync(repositoryName, branchKnowledgeLocation, evidence, cancellationToken);
 
+    public async Task<ReviewedConceptPromotionResult> PromoteAsync(
+        string repositoryName,
+        string repositoryRoot,
+        string sourceBranch,
+        string targetBranch,
+        string sourceBranchKnowledgeLocation,
+        string targetBranchKnowledgeLocation,
+        ReviewedConceptEvidenceContext targetEvidence,
+        GitInfo analyzedGit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceBranch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetBranch);
+        ArgumentNullException.ThrowIfNull(targetEvidence);
+        ArgumentNullException.ThrowIfNull(analyzedGit);
+
+        var sourceLoad = await _reader.LoadAsync(sourceBranchKnowledgeLocation, cancellationToken);
+        if (sourceLoad.Status != ReviewedConceptLoadStatus.Loaded || sourceLoad.Catalog is null)
+        {
+            throw new InvalidDataException("Source reviewed concept catalog is unavailable or invalid.");
+        }
+
+        var previousTarget = await _reader.LoadAsync(targetBranchKnowledgeLocation, cancellationToken);
+        if (previousTarget.Status == ReviewedConceptLoadStatus.Invalid)
+        {
+            throw new InvalidDataException("Existing target reviewed concept catalog is invalid.");
+        }
+
+        if (previousTarget.Status == ReviewedConceptLoadStatus.Loaded)
+        {
+            var existingValidation = _validator.Validate(previousTarget.Catalog!, targetEvidence);
+            var existingResolution = _resolver.Resolve(previousTarget, existingValidation, targetEvidence);
+            if (existingResolution.Status is not ReviewedConceptResolutionStatus.Valid)
+            {
+                throw new InvalidDataException("Existing target reviewed concept catalog is not fully valid.");
+            }
+        }
+
+        var sourceIdentity = new ReviewedConceptCatalogIdentity(
+            targetEvidence.RepositoryId,
+            sourceBranch,
+            KnowledgeIdentity.CreateBranchKey(sourceBranch));
+        var sourceValidation = _validator.ValidateIntegrity(sourceLoad.Catalog, sourceIdentity);
+        var canonicalSourceFingerprint = ReviewedConceptSerializer.CreateCatalogFingerprint(sourceLoad.Catalog);
+        if (!sourceValidation.CatalogIsValid
+            || sourceValidation.Diagnostics.Count > 0
+            || !string.Equals(sourceLoad.ContentHash, canonicalSourceFingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Source reviewed concept catalog failed integrity validation.");
+        }
+
+        var reboundSourceReferences = 0;
+        var rebuiltDeclarations = new List<ReviewedConceptDeclaration>();
+        foreach (var declaration in sourceLoad.Catalog.Declarations)
+        {
+            var assignments = new List<ReviewedConceptAssignment>();
+            foreach (var sourceAssignment in declaration.Assignments)
+            {
+                if (!targetEvidence.Components.TryGetValue(sourceAssignment.EntityId, out var target))
+                {
+                    throw new InvalidDataException("A reviewed assignment cannot be proven against target evidence.");
+                }
+
+                if (string.IsNullOrWhiteSpace(target.RelativePath)
+                    || target.StartLine <= 0
+                    || string.IsNullOrWhiteSpace(target.SourceFingerprint))
+                {
+                    throw new InvalidDataException("Target component evidence is incomplete.");
+                }
+
+                var sourceReference = $"{target.RelativePath}:{target.StartLine}";
+                if (!string.Equals(sourceReference, sourceAssignment.SourceReference, StringComparison.Ordinal))
+                {
+                    reboundSourceReferences++;
+                }
+
+                assignments.Add(new ReviewedConceptAssignment(
+                    sourceAssignment.EntityId,
+                    sourceReference,
+                    target.SourceFingerprint));
+            }
+
+            var draft = declaration with
+            {
+                Assignments = assignments.ToArray(),
+                Fingerprint = string.Empty
+            };
+            rebuiltDeclarations.Add(draft with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(draft)
+            });
+        }
+
+        var candidate = new ReviewedConceptCatalog(
+            ReviewedConceptSerializer.CurrentSchemaVersion,
+            targetEvidence.RepositoryId,
+            targetBranch,
+            targetEvidence.BranchKey,
+            targetEvidence.SourceSnapshotSchema,
+            targetEvidence.SourceAnalyzerVersion,
+            sourceLoad.Catalog.VocabularyVersion,
+            rebuiltDeclarations);
+        var candidateFingerprint = ReviewedConceptSerializer.CreateCatalogFingerprint(candidate);
+        var candidateLoad = new ReviewedConceptLoadResult(
+            ReviewedConceptLoadStatus.Loaded,
+            _reader.GetPath(targetBranchKnowledgeLocation),
+            candidateFingerprint,
+            candidate,
+            []);
+        var candidateValidation = _validator.Validate(candidate, targetEvidence);
+        var candidateResolution = _resolver.Resolve(candidateLoad, candidateValidation, targetEvidence);
+        var sourceAssignmentCount = sourceLoad.Catalog.Declarations.Sum(item => item.Assignments.Count);
+        var candidateAssignmentCount = candidate.Declarations.Sum(item => item.Assignments.Count);
+        if (candidateResolution.Status != ReviewedConceptResolutionStatus.Valid
+            || candidateValidation.Declarations.Count != sourceLoad.Catalog.Declarations.Count
+            || candidateAssignmentCount != sourceAssignmentCount)
+        {
+            throw new InvalidDataException("Promoted reviewed concept catalog failed target validation.");
+        }
+
+        var write = await _writer.WriteAsync(
+            targetBranchKnowledgeLocation,
+            candidate,
+            previousTarget.ContentHash,
+            async token =>
+            {
+                var currentGit = await _gitInfo.GetInfoAsync(repositoryRoot, token);
+                if (!string.Equals(currentGit.Branch, analyzedGit.Branch, StringComparison.Ordinal)
+                    || !string.Equals(currentGit.HeadCommit, analyzedGit.HeadCommit, StringComparison.Ordinal)
+                    || currentGit.IsWorkingTreeClean != true)
+                {
+                    throw new InvalidOperationException("Target repository state changed before promotion commit.");
+                }
+            },
+            cancellationToken);
+
+        return new ReviewedConceptPromotionResult(
+            write.Outcome == ReviewedConceptWriteOutcome.Unchanged
+                ? ReviewedConceptPromotionOutcome.Unchanged
+                : ReviewedConceptPromotionOutcome.Promoted,
+            targetEvidence.RepositoryId,
+            repositoryName,
+            sourceBranch,
+            sourceIdentity.BranchKey,
+            targetBranch,
+            targetEvidence.BranchKey,
+            sourceLoad.Path,
+            write.Path,
+            sourceLoad.ContentHash,
+            previousTarget.ContentHash,
+            write.Fingerprint,
+            candidate.Declarations.Count,
+            candidateAssignmentCount,
+            candidateResolution.Profiles.Count,
+            candidateAssignmentCount,
+            candidate.Declarations.Count,
+            reboundSourceReferences,
+            0,
+            []);
+    }
+
     private async Task<ReviewedConceptLifecycleStatusResult> InspectAsync(
         string repositoryName,
         string branchKnowledgeLocation,
