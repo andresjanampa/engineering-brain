@@ -5,6 +5,10 @@ public sealed record ReviewedConceptCatalogIdentity(
     string Branch,
     string BranchKey);
 
+public sealed record ReviewedConceptIdentityMapping(
+    string OldEntityId,
+    string NewEntityId);
+
 public sealed record ReviewedConceptLifecycleStatusResult(
     string RepositoryId,
     string RepositoryName,
@@ -31,6 +35,19 @@ public enum ReviewedConceptWriteOutcome
     Created,
     Updated,
     Unchanged
+}
+
+public enum ReviewedConceptRemapOutcome
+{
+    Remapped,
+    Blocked
+}
+
+public enum ReviewedConceptRefreshOutcome
+{
+    Refreshed,
+    Unchanged,
+    Blocked
 }
 
 public sealed record ReviewedConceptWriteResult(
@@ -60,6 +77,42 @@ public sealed record ReviewedConceptPromotionResult(
     int RejectedOrStaleAssignmentCount,
     IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics);
 
+public sealed record ReviewedConceptRemapResult(
+    ReviewedConceptRemapOutcome Outcome,
+    string RepositoryId,
+    string RepositoryName,
+    string Branch,
+    string BranchKey,
+    string CatalogPath,
+    string? PreviousCatalogFingerprint,
+    string? NewCatalogFingerprint,
+    int MappingCount,
+    int RemappedAssignmentCount,
+    int DeclarationCount,
+    int AssignmentCount,
+    int ActiveProfileCount,
+    int IdentityMigrationCount,
+    int RemainingStaleAssignmentCount,
+    IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics);
+
+public sealed record ReviewedConceptRefreshResult(
+    ReviewedConceptRefreshOutcome Outcome,
+    string RepositoryId,
+    string RepositoryName,
+    string Branch,
+    string BranchKey,
+    string CatalogPath,
+    string? PreviousCatalogFingerprint,
+    string? NewCatalogFingerprint,
+    int DeclarationCount,
+    int AssignmentCount,
+    int ActiveProfileCount,
+    int RecomputedAssignmentCount,
+    int RecomputedDeclarationFingerprintCount,
+    int ReboundSourceReferenceCount,
+    int RejectedOrStaleAssignmentCount,
+    IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics);
+
 public static class ReviewedConceptLifecycleExitCode
 {
     public static int ForValidation(ReviewedConceptResolutionStatus status) => status switch
@@ -69,5 +122,18 @@ public static class ReviewedConceptLifecycleExitCode
         ReviewedConceptResolutionStatus.Invalid => 4,
         ReviewedConceptResolutionStatus.Absent => 5,
         _ => 4
+    };
+
+    public static int ForRemap(ReviewedConceptRemapOutcome outcome) => outcome switch
+    {
+        ReviewedConceptRemapOutcome.Remapped => 0,
+        _ => 3
+    };
+
+    public static int ForRefresh(ReviewedConceptRefreshOutcome outcome) => outcome switch
+    {
+        ReviewedConceptRefreshOutcome.Refreshed => 0,
+        ReviewedConceptRefreshOutcome.Unchanged => 0,
+        _ => 3
     };
 }

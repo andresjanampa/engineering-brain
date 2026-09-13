@@ -5,6 +5,51 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class ReviewedConceptLifecycleModelTests
 {
     [Theory]
+    [InlineData(ReviewedConceptRemapOutcome.Remapped, 0)]
+    [InlineData(ReviewedConceptRemapOutcome.Blocked, 3)]
+    public void RemapExitCode_IsStable(ReviewedConceptRemapOutcome outcome, int expected)
+    {
+        Assert.Equal(expected, ReviewedConceptLifecycleExitCode.ForRemap(outcome));
+    }
+
+    [Theory]
+    [InlineData(ReviewedConceptRefreshOutcome.Refreshed, 0)]
+    [InlineData(ReviewedConceptRefreshOutcome.Unchanged, 0)]
+    [InlineData(ReviewedConceptRefreshOutcome.Blocked, 3)]
+    public void RefreshExitCode_IsStable(ReviewedConceptRefreshOutcome outcome, int expected)
+    {
+        Assert.Equal(expected, ReviewedConceptLifecycleExitCode.ForRefresh(outcome));
+    }
+
+    [Fact]
+    public void RemapResult_CarriesAuditFingerprintsAndCounts()
+    {
+        var result = new ReviewedConceptRemapResult(
+            ReviewedConceptRemapOutcome.Remapped,
+            "repository", "engineering-brain", "main", "main--key", "catalog.json",
+            "previous", "next", 2, 3, 25, 43, 29, 2, 0, []);
+
+        Assert.Equal(2, result.MappingCount);
+        Assert.Equal(3, result.RemappedAssignmentCount);
+        Assert.Equal(2, result.IdentityMigrationCount);
+        Assert.Equal("next", result.NewCatalogFingerprint);
+    }
+
+    [Fact]
+    public void RefreshResult_CarriesRebindingFingerprintsAndCounts()
+    {
+        var result = new ReviewedConceptRefreshResult(
+            ReviewedConceptRefreshOutcome.Refreshed,
+            "repository", "engineering-brain", "main", "main--key", "catalog.json",
+            "previous", "next", 25, 43, 29, 43, 25, 7, 0, []);
+
+        Assert.Equal(43, result.RecomputedAssignmentCount);
+        Assert.Equal(25, result.RecomputedDeclarationFingerprintCount);
+        Assert.Equal(7, result.ReboundSourceReferenceCount);
+        Assert.Equal("next", result.NewCatalogFingerprint);
+    }
+
+    [Theory]
     [InlineData(ReviewedConceptResolutionStatus.Valid, 0)]
     [InlineData(ReviewedConceptResolutionStatus.ValidWithDiagnostics, 3)]
     [InlineData(ReviewedConceptResolutionStatus.Invalid, 4)]
