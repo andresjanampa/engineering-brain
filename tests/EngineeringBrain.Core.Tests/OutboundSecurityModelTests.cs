@@ -1,9 +1,57 @@
 using EngineeringBrain.Core;
+using EngineeringBrain.Infrastructure;
 
 namespace EngineeringBrain.Core.Tests;
 
 public sealed class OutboundSecurityModelTests
 {
+    [Fact]
+    public void Format_AssessmentShowsPolicyIdOutcomeAndAssessmentKind()
+    {
+        var assessment = new OutboundPolicyEvaluator().Evaluate(
+            OutboundAssessmentKind.Exact,
+            "fingerprint",
+            []);
+
+        var lines = OutboundPolicyDiagnosticFormatter.Format(assessment);
+
+        Assert.Equal("Assessment: Exact", lines[0]);
+        Assert.Contains(lines, line => line.Contains(
+            "SYS_REMOTE_COMPLETE_REPOSITORY v1: Allowed",
+            StringComparison.Ordinal));
+        Assert.Equal("Overall: Allowed", lines[^1]);
+    }
+
+    [Fact]
+    public void Format_NotRecordedNeverRendersAllowed()
+    {
+        var lines = OutboundPolicyDiagnosticFormatter.Format(OutboundPolicyAssessment.NotRecorded);
+
+        Assert.Equal(["Assessment: NotRecorded", "Overall: NotRecorded"], lines);
+        Assert.DoesNotContain(lines, line => line.Contains("Allowed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Format_DiagnosticsAreSingleLineAndBounded()
+    {
+        var assessment = new OutboundPolicyAssessment(
+            OutboundAssessmentKind.Exact,
+            OutboundPolicyOutcome.Blocked,
+            [],
+            [$"OUTBOUND_POLICY_EVALUATION_FAILED\r\n\t{new string('x', 1024)}"],
+            null);
+
+        var lines = OutboundPolicyDiagnosticFormatter.Format(assessment);
+
+        Assert.All(lines, line =>
+        {
+            Assert.DoesNotContain('\r', line);
+            Assert.DoesNotContain('\n', line);
+            Assert.DoesNotContain('\t', line);
+            Assert.InRange(line.Length, 1, OutboundPolicyDiagnosticFormatter.MaximumLineLength);
+        });
+    }
+
     [Fact]
     public void NotRecorded_IsExplicitAndNeverAllowed()
     {

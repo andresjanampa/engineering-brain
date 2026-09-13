@@ -7,6 +7,24 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class InitiativeAnalysisSecurityTests
 {
     [Fact]
+    public void PreviewOutput_LabelsCallTwoProjected()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "EngineeringBrain.Cli", "Program.cs"));
+
+        Assert.Contains("WriteOutboundAssessment(\"CALL #1 exact\", preview.Call1PolicyAssessment)", source, StringComparison.Ordinal);
+        Assert.Contains("WriteOutboundAssessment(\"CALL #2 projection\", preview.Call2PolicyAssessment)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnalyzeOutput_LabelsBothActualCallsExact()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "EngineeringBrain.Cli", "Program.cs"));
+
+        Assert.Contains("WriteOutboundAssessment(\"CALL #1 exact\", result.OutboundPolicyAssessments[0])", source, StringComparison.Ordinal);
+        Assert.Contains("WriteOutboundAssessment(\"CALL #2 exact\", result.OutboundPolicyAssessments[1])", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RemoteAuthorization_RequiresExplicitOptInBeforeReadingCredential()
     {
         var read = false;
@@ -152,6 +170,22 @@ public sealed class InitiativeAnalysisSecurityTests
             ? InitiativeAnalysisTestData.Understanding("business")
             : InitiativeAnalysisTestData.Analysis(
                 InitiativeAnalysisTestData.Recommendation(RecommendationDecision.Create, [])));
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "EngineeringBrain.sln")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("EngineeringBrain.sln was not found.");
+    }
 
     private sealed class UnsafeThrowingProvider : IReasoningProvider
     {

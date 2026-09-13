@@ -777,6 +777,8 @@ internal static class BrainCli
         Console.WriteLine($"Estimated input tokens: {preview.Call2.EstimatedTokens}");
 
         WriteSection("Security");
+        WriteOutboundAssessment("CALL #1 exact", preview.Call1PolicyAssessment);
+        WriteOutboundAssessment("CALL #2 projection", preview.Call2PolicyAssessment);
         Console.WriteLine($"Source bodies: {preview.Security.SourceBodyFindings}");
         Console.WriteLine($"Absolute paths: {preview.Security.AbsolutePathFindings}");
         Console.WriteLine($"Secrets detected: {preview.Security.SecretFindings}");
@@ -833,7 +835,7 @@ internal static class BrainCli
         Console.WriteLine($"Usage calls/attempts/input/cached/output: {aggregate.Usage.LogicalCalls}/{aggregate.Usage.ProviderAttempts}/{aggregate.Usage.ActualInputTokens}/{aggregate.Usage.CachedInputTokens}/{aggregate.Usage.ActualOutputTokens}");
         Console.WriteLine($"Duration: {aggregate.Usage.DurationMilliseconds} ms; retries: {aggregate.Usage.Retries}; cost USD: {(aggregate.Usage.EstimatedCostUsd?.ToString("F6") ?? "n/a")}");
         Console.WriteLine($"Consistency status/decision/entity/capability/evidence: {result.Consistency.StatusAgreement:F3}/{result.Consistency.DecisionAgreement:F3}/{result.Consistency.EntityReferenceOverlap:F3}/{result.Consistency.CapabilityOverlap:F3}/{result.Consistency.EvidenceValidityAgreement:F3}");
-        Console.WriteLine($"Outbound source/secrets/absolute/raw snapshot: {aggregate.SourceBodyOutbound}/{aggregate.SecretOutbound}/{aggregate.AbsolutePathOutbound}/{aggregate.RawSnapshotOutbound}");
+        Console.WriteLine($"Outbound complete repository/source/secrets/absolute/raw snapshot: {aggregate.CompleteRepositoryOutbound}/{aggregate.SourceBodyOutbound}/{aggregate.SecretOutbound}/{aggregate.AbsolutePathOutbound}/{aggregate.RawSnapshotOutbound}");
         WriteSection("Artifacts");
         Console.WriteLine($"Summary: {result.SummaryPath}");
         Console.WriteLine($"Review: {result.ReviewPath}");
@@ -920,6 +922,16 @@ internal static class BrainCli
             Console.WriteLine($"- {candidate.FullName} | score {candidate.Score} | {reasons}");
         }
 
+        WriteSection("Outbound Security");
+        if (result.OutboundPolicyAssessments.Count > 0)
+        {
+            WriteOutboundAssessment("CALL #1 exact", result.OutboundPolicyAssessments[0]);
+        }
+        if (result.OutboundPolicyAssessments.Count > 1)
+        {
+            WriteOutboundAssessment("CALL #2 exact", result.OutboundPolicyAssessments[1]);
+        }
+
         WriteSection("Recommendations");
         foreach (var governed in result.Recommendations)
         {
@@ -979,6 +991,15 @@ internal static class BrainCli
     }
 
     private static string FormatUsage(int? tokens) => tokens?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unavailable";
+
+    private static void WriteOutboundAssessment(string label, OutboundPolicyAssessment assessment)
+    {
+        Console.WriteLine(label);
+        foreach (var line in OutboundPolicyDiagnosticFormatter.Format(assessment))
+        {
+            Console.WriteLine($"- {line}");
+        }
+    }
 
     private static void WriteValues(string label, IReadOnlyList<string> values)
     {
