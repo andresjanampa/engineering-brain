@@ -277,6 +277,7 @@ public sealed class ReviewedConceptLifecycleService
         }
 
         var migrations = load.Catalog.IdentityMigrations.ToList();
+        var reviewedAtUtc = _timeProvider.GetUtcNow().ToUniversalTime();
         foreach (var mapping in mappings.OrderBy(item => item.OldEntityId, StringComparer.Ordinal))
         {
             var destination = evidence.Components[mapping.NewEntityId];
@@ -296,7 +297,7 @@ public sealed class ReviewedConceptLifecycleService
                 load.ContentHash!,
                 $"{destination.RelativePath}:{destination.StartLine}",
                 destination.SourceFingerprint,
-                new ReviewedConceptReview(reviewer.Trim(), 1, _timeProvider.GetUtcNow().ToUniversalTime()),
+                new ReviewedConceptReview(reviewer.Trim(), 1, reviewedAtUtc),
                 string.Empty);
             migrations.Add(migration with
             {

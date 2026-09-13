@@ -215,6 +215,24 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
+    public async Task RemapAsync_AllMappingsShareOneReviewTimestamp()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync(addSecondMissing: true);
+        var clock = new AdvancingTimeProvider(fixture.Now, TimeSpan.FromMinutes(1));
+
+        await fixture.RemapAsync(
+        [
+            new("entity:missing", "entity:business-service"),
+            new("entity:other-missing", "entity:model")
+        ], timeProvider: clock);
+        var remapped = await fixture.LoadAsync();
+
+        Assert.Equal(2, remapped.IdentityMigrations.Count);
+        Assert.Single(remapped.IdentityMigrations.Select(item => item.Review.ReviewedAtUtc).Distinct());
+    }
+
+    [Fact]
     public async Task RemapAsync_UncoveredRc400BlocksWithoutWrite()
     {
         using var fixture = new RefreshFixture();
@@ -1328,10 +1346,11 @@ public sealed class ReviewedConceptLifecycleServiceTests
             string reviewer = "alice",
             ReviewedConceptEvidenceContext? evidence = null,
             GitInfo? analyzedGit = null,
-            IGitInfoProvider? gitInfo = null) =>
+            IGitInfoProvider? gitInfo = null,
+            TimeProvider? timeProvider = null) =>
             new ReviewedConceptLifecycleService(
                 gitInfo: gitInfo ?? new StaticGitInfoProvider(Git),
-                timeProvider: new FixedTimeProvider(Now)).RemapAsync(
+                timeProvider: timeProvider ?? new FixedTimeProvider(Now)).RemapAsync(
                 "demo",
                 RepositoryRoot,
                 BranchRoot,
@@ -1475,6 +1494,18 @@ public sealed class ReviewedConceptLifecycleServiceTests
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class AdvancingTimeProvider(DateTimeOffset now, TimeSpan increment) : TimeProvider
+    {
+        private DateTimeOffset _current = now;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            var result = _current;
+            _current += increment;
+            return result;
+        }
     }
 
     private sealed class MutatingGitInfoProvider(
