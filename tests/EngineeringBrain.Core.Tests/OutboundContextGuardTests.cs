@@ -450,6 +450,17 @@ public sealed class OutboundContextGuardTests
         AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
     }
 
+    [Theory]
+    [InlineData("public void Save(string value = \"=>\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"\\\"=>\\\"\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = @\"=>\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"\"\"=>\"\"\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"{=>;}()\")\n{\n    return;\n}")]
+    public void Inspect_QuotedCFamilyExpressionArrowsCannotHideBody(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
     [Fact]
     public void Inspect_WhitespaceAndCommentsBetweenDeclarationAndBraceCannotHideBody()
     {
@@ -510,6 +521,17 @@ public sealed class OutboundContextGuardTests
     public void Inspect_QuotedCFamilyStructuralDelimiterSignaturesWithoutBodiesAreAllowed(string signature)
     {
         Assert.Empty(_guard.Inspect(Request(signature)));
+    }
+
+    [Theory]
+    [InlineData("public void Save(string value = \"=>\");")]
+    [InlineData("public void Save(string value = \"\\\"=>\\\"\");")]
+    [InlineData("public void Save(string value = @\"=>\");")]
+    [InlineData("public void Save(string value = \"\"\"=>\"\"\");")]
+    [InlineData("public string Name => value;")]
+    public void Inspect_QuotedArrowSignaturesAndExpressionBodiedMembersRemainAllowed(string content)
+    {
+        Assert.Empty(_guard.Inspect(Request(content)));
     }
 
     [Fact]

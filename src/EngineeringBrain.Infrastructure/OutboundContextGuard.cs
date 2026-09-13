@@ -479,9 +479,10 @@ public sealed partial class OutboundContextGuard
     private static bool IsCFamilyDeclarationHeader(string header)
     {
         var text = header.Trim();
+        var structure = ScanCFamilyStructure(text);
         if (text.Length == 0
-            || ScanCFamilyStructure(text).Terminator >= 0
-            || text.Contains("=>", StringComparison.Ordinal))
+            || structure.Terminator >= 0
+            || structure.ExpressionArrow >= 0)
         {
             return false;
         }
@@ -709,6 +710,7 @@ public sealed partial class OutboundContextGuard
         var terminator = -1;
         var openingParenthesis = -1;
         var closingParenthesis = -1;
+        var expressionArrow = -1;
         var parenthesisDepth = 0;
         var lexicalState = CFamilyLexicalState.Normal;
         var escaped = false;
@@ -731,6 +733,11 @@ public sealed partial class OutboundContextGuard
                     break;
                 case ';' when terminator < 0:
                     terminator = index;
+                    break;
+                case '=' when expressionArrow < 0
+                    && index + 1 < value.Length
+                    && value[index + 1] == '>':
+                    expressionArrow = index;
                     break;
                 case '(' when closingParenthesis < 0:
                     if (parenthesisDepth == 0 && openingParenthesis < 0)
@@ -756,7 +763,8 @@ public sealed partial class OutboundContextGuard
             closingBrace,
             terminator,
             openingParenthesis,
-            closingParenthesis);
+            closingParenthesis,
+            expressionArrow);
     }
 
     private static bool IsUnquotedCFamilyCharacter(
@@ -831,7 +839,8 @@ public sealed partial class OutboundContextGuard
         int ClosingBrace,
         int Terminator,
         int OpeningParenthesis,
-        int ClosingParenthesis);
+        int ClosingParenthesis,
+        int ExpressionArrow);
 
     private static bool IsCFamilyModifier(string value) => value is
         "public" or "private" or "protected" or "internal" or "static" or "abstract" or "sealed"
