@@ -126,7 +126,8 @@ public enum ContextSegmentKind
     ComponentNote,
     GraphEvidence,
     SourceBody,
-    RawSnapshot
+    RawSnapshot,
+    CompleteRepository
 }
 
 public sealed record InitiativeUnderstanding(
