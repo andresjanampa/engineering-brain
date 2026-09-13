@@ -77,6 +77,21 @@ public sealed class OutboundContextGuardTests
     }
 
     [Fact]
+    public void Inspect_RepositoryFilesEnvelopeInsideAllowedProjectNoteIsBlockedWithoutRetention()
+    {
+        const string prohibitedValue = "repository-source-must-not-be-retained";
+        const string payload = """
+            {"repository":{"name":"sample"},"files":[{"path":"src/A.cs","content":"repository-source-must-not-be-retained"}]}
+            """;
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        var findings = _guard.Inspect(Request(context.Content), context);
+
+        AssertFinding(findings, PolicyContentScope.CompleteRepository);
+        Assert.DoesNotContain(prohibitedValue, string.Join('\n', findings), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Inspect_BoundedProjectMemoryAndGraphFactsAreAllowed()
     {
         var context = Context(
@@ -94,6 +109,96 @@ public sealed class OutboundContextGuardTests
             """;
 
         AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_RawSnapshotInsideAllowedGraphEvidenceIsBlockedWithoutRetention()
+    {
+        const string prohibitedValue = "snapshot-value-must-not-be-retained";
+        const string payload = """
+            {"schemaVersion":3,"repository":{"name":"snapshot-value-must-not-be-retained"},"git":{},"projects":[],"entities":[],"relations":[]}
+            """;
+        var context = Context(ContextSegmentKind.GraphEvidence, payload);
+
+        var findings = _guard.Inspect(Request(context.Content), context);
+
+        AssertFinding(findings, PolicyContentScope.RawSnapshot);
+        Assert.DoesNotContain(prohibitedValue, string.Join('\n', findings), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(ContextSegmentKind.ProjectNote)]
+    [InlineData(ContextSegmentKind.GraphEvidence)]
+    public void Inspect_BoundedDerivedJsonInsideAllowedSegmentIsAllowed(ContextSegmentKind kind)
+    {
+        const string payload = """
+            {"repository":"engineering-brain","entities":[{"id":"entity:1"}],"relations":[]}
+            """;
+        var context = Context(kind, payload);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Theory]
+    [InlineData(ContextSegmentKind.ProjectNote, "Project: EngineeringBrain.Core")]
+    [InlineData(ContextSegmentKind.GraphEvidence, "Entity: RepositoryScanner")]
+    public void Inspect_OrdinaryAllowedSegmentContentIsAllowed(ContextSegmentKind kind, string content)
+    {
+        var context = Context(kind, content);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Fact]
+    public void Inspect_MultipleStructuredSegmentViolationsAreOrderedAndBounded()
+    {
+        var segments = new[]
+        {
+            new ContextSegment(
+                ContextSegmentKind.ProjectNote,
+                "{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}",
+                1,
+                "test",
+                1,
+                true),
+            new ContextSegment(
+                ContextSegmentKind.GraphEvidence,
+                "{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}",
+                1,
+                "test",
+                1,
+                true),
+            new ContextSegment(
+                ContextSegmentKind.ComponentNote,
+                "api_key=fake-secret-value",
+                1,
+                "test",
+                1,
+                true)
+        };
+        var content = ContextSegmentRenderer.Render(segments);
+        var context = new InitiativeContext(content, 1, [], [], segments);
+
+        var findings = _guard.Inspect(Request(content), context);
+
+        Assert.Equal(
+            [PolicyContentScope.CompleteRepository, PolicyContentScope.RawSnapshot, PolicyContentScope.Secrets],
+            findings.Select(finding => finding.Category));
+        Assert.All(findings, finding => Assert.InRange(finding.FindingCount, 1, 99));
+    }
+
+    [Theory]
+    [InlineData(ContextSegmentKind.ProjectNote, "public class Leaked { int Value; }", PolicyContentScope.SourceBodies)]
+    [InlineData(ContextSegmentKind.GraphEvidence, "api_key=fake-secret-value", PolicyContentScope.Secrets)]
+    [InlineData(ContextSegmentKind.ComponentNote, "C:\\Users\\person\\private\\File.cs", PolicyContentScope.AbsoluteLocalPaths)]
+    public void Inspect_AllowedSegmentContentIsCheckedAcrossTextCategories(
+        ContextSegmentKind kind,
+        string content,
+        PolicyContentScope expectedCategory)
+    {
+        var context = Context(kind, content);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), expectedCategory);
     }
 
     [Fact]

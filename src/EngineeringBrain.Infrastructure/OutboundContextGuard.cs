@@ -34,16 +34,18 @@ public sealed partial class OutboundContextGuard
     {
         ArgumentNullException.ThrowIfNull(request);
         var findings = new Dictionary<PolicyContentScope, FindingAccumulator>();
+        var segmentFindings = new Dictionary<PolicyContentScope, FindingAccumulator>();
 
         try
         {
             if (context is not null)
             {
-                InspectContext(request, context, findings);
+                InspectContext(request, context, findings, segmentFindings);
             }
 
             InspectText(request.SystemInstructions, findings);
             InspectText(request.UserData, findings);
+            MergeMissing(findings, segmentFindings);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -101,20 +103,9 @@ public sealed partial class OutboundContextGuard
     private void InspectContext(
         ReasoningRequest request,
         InitiativeContext context,
-        Dictionary<PolicyContentScope, FindingAccumulator> findings)
+        Dictionary<PolicyContentScope, FindingAccumulator> findings,
+        Dictionary<PolicyContentScope, FindingAccumulator> segmentFindings)
     {
-        var rendered = ContextSegmentRenderer.Render(context.Segments);
-        if (!string.Equals(request.UserData, context.Content, StringComparison.Ordinal)
-            || !string.Equals(context.Content, rendered, StringComparison.Ordinal))
-        {
-            Add(
-                findings,
-                PolicyContentScope.SourceBodies,
-                OutboundInspectionReasonCode.ContextRepresentationMismatch,
-                OutboundTriggerKind.ContextIntegrity,
-                1);
-        }
-
         foreach (var segment in context.Segments)
         {
             switch (segment.Kind)
@@ -139,6 +130,20 @@ public sealed partial class OutboundContextGuard
                     }
                     break;
             }
+
+            InspectText(segment.Content, segmentFindings);
+        }
+
+        var rendered = ContextSegmentRenderer.Render(context.Segments);
+        if (!string.Equals(request.UserData, context.Content, StringComparison.Ordinal)
+            || !string.Equals(context.Content, rendered, StringComparison.Ordinal))
+        {
+            Add(
+                findings,
+                PolicyContentScope.SourceBodies,
+                OutboundInspectionReasonCode.ContextRepresentationMismatch,
+                OutboundTriggerKind.ContextIntegrity,
+                1);
         }
 
         foreach (var sourceReference in context.IncludedNotePaths)
@@ -326,6 +331,16 @@ public sealed partial class OutboundContextGuard
         }
 
         finding.Add(count);
+    }
+
+    private static void MergeMissing(
+        Dictionary<PolicyContentScope, FindingAccumulator> findings,
+        IReadOnlyDictionary<PolicyContentScope, FindingAccumulator> additionalFindings)
+    {
+        foreach (var (category, finding) in additionalFindings)
+        {
+            findings.TryAdd(category, finding);
+        }
     }
 
     private static OutboundValidationResult ToLegacyResult(
