@@ -5,6 +5,99 @@ namespace EngineeringBrain.Core.Tests;
 
 public sealed class ReviewedConceptValidatorTests
 {
+    [Fact]
+    public void ValidateIntegrity_UsesExpectedSourceIdentityWithoutResolvingSourceCode()
+    {
+        var catalog = ReviewedConceptTestData.Catalog() with
+        {
+            SourceSnapshotSchema = 1,
+            SourceAnalyzerVersion = "historical-analyzer"
+        };
+        var evidence = ReviewedConceptTestData.Evidence();
+        var identity = new ReviewedConceptCatalogIdentity(
+            evidence.RepositoryId, catalog.Branch, catalog.BranchKey);
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(catalog, identity);
+
+        Assert.True(result.CatalogIsValid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("repository", "RC101")]
+    [InlineData("branch", "RC102")]
+    [InlineData("branch-key", "RC103")]
+    [InlineData("snapshot", "RC109")]
+    [InlineData("analyzer", "RC110")]
+    [InlineData("duplicate", "RC107")]
+    public void ValidateIntegrity_InvalidArtifactIdentityOrStructureDisablesCatalog(
+        string invalidField,
+        string expectedCode)
+    {
+        var catalog = ReviewedConceptTestData.Catalog();
+        var evidence = ReviewedConceptTestData.Evidence();
+        var identity = new ReviewedConceptCatalogIdentity(
+            evidence.RepositoryId, catalog.Branch, catalog.BranchKey);
+        catalog = invalidField switch
+        {
+            "repository" => catalog with { RepositoryId = "repository:other" },
+            "branch" => catalog with { Branch = "feature/other" },
+            "branch-key" => catalog with { BranchKey = "other--key" },
+            "snapshot" => catalog with { SourceSnapshotSchema = 0 },
+            "analyzer" => catalog with { SourceAnalyzerVersion = " " },
+            "duplicate" => catalog with { Declarations = [catalog.Declarations[0], catalog.Declarations[0]] },
+            _ => throw new InvalidOperationException()
+        };
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(catalog, identity);
+
+        Assert.False(result.CatalogIsValid);
+        Assert.Empty(result.Declarations);
+        Assert.Contains(result.Diagnostics, item => item.Code == expectedCode);
+    }
+
+    [Fact]
+    public void ValidateIntegrity_IncompleteDeclarationIsExcludedWithoutFingerprinting()
+    {
+        var catalog = ReviewedConceptTestData.Catalog();
+        var valid = catalog.Declarations[0];
+        var incomplete = catalog.Declarations[1] with
+        {
+            Provenance = null!,
+            Review = null!,
+            Assignments = [null!]
+        };
+        var identity = new ReviewedConceptCatalogIdentity(
+            catalog.RepositoryId, catalog.Branch, catalog.BranchKey);
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(
+            catalog with { Declarations = [valid, incomplete] },
+            identity);
+
+        Assert.True(result.CatalogIsValid);
+        Assert.Single(result.Declarations);
+        Assert.Equal(valid.ConceptId, result.Declarations[0].ConceptId);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC208");
+    }
+
+    [Fact]
+    public void Validate_CurrentEvidenceStillRejectsSchemaAndAnalyzerMismatch()
+    {
+        var catalog = ReviewedConceptTestData.Catalog() with
+        {
+            SourceSnapshotSchema = 1,
+            SourceAnalyzerVersion = "historical-analyzer"
+        };
+
+        var result = new ReviewedConceptValidator().Validate(
+            catalog,
+            ReviewedConceptTestData.Evidence());
+
+        Assert.False(result.CatalogIsValid);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC104");
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC105");
+    }
+
     [Theory]
     [InlineData("schema")]
     [InlineData("repository")]

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace EngineeringBrain.Core;
 
 public sealed record RepositoryInfo(string Id, string Name, string Root);
@@ -7,7 +9,13 @@ public sealed record GitInfo(
     string? Branch,
     string? HeadCommit,
     string? Remote,
-    bool? IsWorkingTreeClean);
+    bool? IsWorkingTreeClean)
+{
+    public const string DetachedHeadBranch = "(detached HEAD)";
+
+    [JsonIgnore]
+    public bool IsDetachedHead => string.Equals(Branch, DetachedHeadBranch, StringComparison.Ordinal);
+}
 
 public sealed record LanguageStatistics(string Language, int FileCount, long TotalBytes);
 

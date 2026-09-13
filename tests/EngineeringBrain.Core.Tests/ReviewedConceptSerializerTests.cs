@@ -5,6 +5,15 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class ReviewedConceptSerializerTests
 {
     [Fact]
+    public void CreateCatalogFingerprint_IsCanonicalAndDeterministic()
+    {
+        var catalog = ReviewedConceptTestData.Catalog();
+        var expected = KnowledgeIdentity.ContentHash(ReviewedConceptSerializer.Serialize(catalog));
+
+        Assert.Equal(expected, ReviewedConceptSerializer.CreateCatalogFingerprint(catalog));
+    }
+
+    [Fact]
     public void Serialize_IsDeterministicAcrossInputOrderingAndLineEndings()
     {
         var first = ReviewedConceptTestData.Catalog(reversed: false);

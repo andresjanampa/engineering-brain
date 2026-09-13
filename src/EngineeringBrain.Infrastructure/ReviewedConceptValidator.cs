@@ -19,12 +19,46 @@ public sealed partial class ReviewedConceptValidator
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(evidence);
 
-        var diagnostics = ValidateEnvelope(catalog, evidence);
+        var integrity = ValidateIntegrity(catalog, new ReviewedConceptCatalogIdentity(
+            evidence.RepositoryId,
+            evidence.Branch,
+            evidence.BranchKey));
+        if (!integrity.CatalogIsValid)
+        {
+            return integrity;
+        }
+
+        var diagnostics = integrity.Diagnostics.ToList();
+        AddCatalogError(catalog.SourceSnapshotSchema != evidence.SourceSnapshotSchema, "RC104",
+            "Reviewed concept snapshot schema does not match current evidence.", diagnostics);
+        AddCatalogError(!string.Equals(catalog.SourceAnalyzerVersion, evidence.SourceAnalyzerVersion,
+                StringComparison.Ordinal),
+            "RC105", "Reviewed concept analyzer version does not match current evidence.", diagnostics);
+        return diagnostics.Any(item => item.Scope == ReviewedConceptDiagnosticScope.Catalog)
+            ? new ReviewedConceptValidationResult(false, [], diagnostics)
+            : integrity with { Diagnostics = diagnostics };
+    }
+
+    public ReviewedConceptValidationResult ValidateIntegrity(
+        ReviewedConceptCatalog catalog,
+        ReviewedConceptCatalogIdentity expected)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(expected);
+
+        var diagnostics = ValidateEnvelopeIntegrity(catalog, expected);
         if (diagnostics.Count > 0)
         {
             return new ReviewedConceptValidationResult(false, [], diagnostics);
         }
 
+        return ValidateDeclarationsAndAssignments(catalog, diagnostics);
+    }
+
+    private ReviewedConceptValidationResult ValidateDeclarationsAndAssignments(
+        ReviewedConceptCatalog catalog,
+        List<ReviewedConceptDiagnostic> diagnostics)
+    {
         var declarations = new List<ReviewedConceptDeclaration>();
         foreach (var declaration in catalog.Declarations.OrderBy(item => item?.ConceptId, StringComparer.Ordinal))
         {
@@ -71,9 +105,9 @@ public sealed partial class ReviewedConceptValidator
         return new ReviewedConceptValidationResult(true, declarations, diagnostics);
     }
 
-    private static List<ReviewedConceptDiagnostic> ValidateEnvelope(
+    private static List<ReviewedConceptDiagnostic> ValidateEnvelopeIntegrity(
         ReviewedConceptCatalog catalog,
-        ReviewedConceptEvidenceContext evidence)
+        ReviewedConceptCatalogIdentity expected)
     {
         var diagnostics = new List<ReviewedConceptDiagnostic>();
         AddCatalogError(catalog.RepositoryId is null
@@ -85,16 +119,12 @@ public sealed partial class ReviewedConceptValidator
             "RC108", "Reviewed concept catalog structure is incomplete.", diagnostics);
         AddCatalogError(catalog.SchemaVersion != ReviewedConceptSerializer.CurrentSchemaVersion, "RC100",
             "Reviewed concept schema is incompatible.", diagnostics);
-        AddCatalogError(!string.Equals(catalog.RepositoryId, evidence.RepositoryId, StringComparison.Ordinal), "RC101",
+        AddCatalogError(!string.Equals(catalog.RepositoryId, expected.RepositoryId, StringComparison.Ordinal), "RC101",
             "Reviewed concept repository identity does not match current evidence.", diagnostics);
-        AddCatalogError(!string.Equals(catalog.Branch, evidence.Branch, StringComparison.Ordinal), "RC102",
+        AddCatalogError(!string.Equals(catalog.Branch, expected.Branch, StringComparison.Ordinal), "RC102",
             "Reviewed concept branch does not match current evidence.", diagnostics);
-        AddCatalogError(!string.Equals(catalog.BranchKey, evidence.BranchKey, StringComparison.Ordinal), "RC103",
+        AddCatalogError(!string.Equals(catalog.BranchKey, expected.BranchKey, StringComparison.Ordinal), "RC103",
             "Reviewed concept branch key does not match current evidence.", diagnostics);
-        AddCatalogError(catalog.SourceSnapshotSchema != evidence.SourceSnapshotSchema, "RC104",
-            "Reviewed concept snapshot schema does not match current evidence.", diagnostics);
-        AddCatalogError(!string.Equals(catalog.SourceAnalyzerVersion, evidence.SourceAnalyzerVersion, StringComparison.Ordinal),
-            "RC105", "Reviewed concept analyzer version does not match current evidence.", diagnostics);
         AddCatalogError(string.IsNullOrWhiteSpace(catalog.VocabularyVersion), "RC106",
             "Reviewed concept vocabulary version is missing.", diagnostics);
         AddCatalogError(catalog.Declarations is not null && catalog.Declarations
@@ -102,6 +132,10 @@ public sealed partial class ReviewedConceptValidator
                 .GroupBy(item => item.ConceptId, StringComparer.Ordinal)
                 .Any(group => group.Count() > 1),
             "RC107", "Reviewed concept identifiers must be unique.", diagnostics);
+        AddCatalogError(catalog.SourceSnapshotSchema <= 0, "RC109",
+            "Reviewed concept historical snapshot schema is invalid.", diagnostics);
+        AddCatalogError(string.IsNullOrWhiteSpace(catalog.SourceAnalyzerVersion), "RC110",
+            "Reviewed concept historical analyzer metadata is invalid.", diagnostics);
         return diagnostics;
     }
 

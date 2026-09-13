@@ -94,6 +94,39 @@ public sealed class ProjectMemoryServiceTests
     }
 
     [Fact]
+    public async Task ProjectMemorySync_RemainsUnawareOfLifecycleWriterArtifacts()
+    {
+        using var fixture = new MemoryFixture();
+        var snapshot = ProjectMemoryTestFactory.Create();
+        var initialized = await fixture.Service.SyncAsync(snapshot);
+        var semanticPath = Path.Combine(initialized.Location, "semantic", "reviewed-concepts.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(semanticPath)!);
+        var semanticBytes = "{\"managedBy\":\"reviewed-concept-lifecycle\"}"u8.ToArray();
+        await File.WriteAllBytesAsync(semanticPath, semanticBytes);
+        var timestamp = File.GetLastWriteTimeUtc(semanticPath);
+
+        var incremental = await fixture.Service.SyncAsync(snapshot);
+        var withoutModel = snapshot with
+        {
+            Entities = snapshot.Entities.Where(item => item.Id != "entity:model").ToArray(),
+            Relations = snapshot.Relations.Where(item =>
+                item.SourceEntityId != "entity:model" && item.TargetEntityId != "entity:model").ToArray()
+        };
+        await fixture.Service.SyncAsync(withoutModel);
+        var manifestPath = Path.Combine(initialized.Location, "manifest.json");
+        await File.WriteAllTextAsync(manifestPath, (await File.ReadAllTextAsync(manifestPath)).Replace(
+            "\"knowledgeSchemaVersion\": 1",
+            "\"knowledgeSchemaVersion\": 999",
+            StringComparison.Ordinal));
+        var rebuilt = await fixture.Service.SyncAsync(snapshot);
+
+        Assert.Equal(ProjectMemorySyncMode.Incremental, incremental.Mode);
+        Assert.Equal(ProjectMemorySyncMode.Rebuild, rebuilt.Mode);
+        Assert.Equal(semanticBytes, await File.ReadAllBytesAsync(semanticPath));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(semanticPath));
+    }
+
+    [Fact]
     public async Task SyncAsync_AddedAndDeletedProjectCreateAndRemoveItsManagedNotes()
     {
         using var fixture = new MemoryFixture();

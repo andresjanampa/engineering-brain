@@ -26,7 +26,7 @@ public sealed class GitInfoProvider : IGitInfoProvider, IGitChangeProvider
         var reportedBranch = branch switch
         {
             null => null,
-            "" => "(detached HEAD)",
+            "" => GitInfo.DetachedHeadBranch,
             _ => branch
         };
         bool? isWorkingTreeClean = status is null ? null : status.Length == 0;

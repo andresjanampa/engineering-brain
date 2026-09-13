@@ -96,6 +96,27 @@ brain memory sync [path]
 
 The first sync initializes `manifest.json`, a root index, an architecture overview, project notes, and bounded top-level component notes. Later syncs compare deterministic source fingerprints, reuse unchanged notes, remove only stale managed notes, and preserve unmanaged files.
 
+## Manage reviewed concepts
+
+Inspect or validate the reviewed catalog for the current repository and branch without changing snapshots, Project Memory, or the catalog:
+
+```powershell
+brain concepts status [path]
+brain concepts validate [path]
+```
+
+`status` reports `Absent`, `Valid`, `ValidWithDiagnostics`, or `Invalid` and exits `0` when inspection completes. `validate` exits `0` for `Valid`, `3` for `ValidWithDiagnostics`, `4` for `Invalid`, and `5` for `Absent`; usage errors remain `2` and operational failures remain `1`.
+
+Promote reviewed decisions from one branch-scoped catalog to the current checked-out target branch:
+
+```powershell
+brain concepts promote <source-branch> <target-branch> [--repo <path>]
+```
+
+The target checkout must already be on `target-branch`, have a stable HEAD, and be clean. To target another checkout, pass its path with `--repo`; the command never checks out, creates, switches, or fetches branches. Promotion reads the source catalog as reviewed semantic decisions, then rebinds every assignment to fresh target evidence and recomputes source references and fingerprints. One unprovable assignment blocks the entire operation, so there is no partial promotion. An existing invalid target also blocks replacement.
+
+Only the external `semantic/reviewed-concepts.json` artifact is mutable. `LocalReviewedConceptWriter` is the sole lifecycle mutation boundary; it uses an exclusive sibling lock, a flushed temporary file, a final expected-content check after repository validation, and atomic replacement. The lock serializes cooperating lifecycle writers; the final check detects non-cooperating changes during validation without claiming portable compare-and-swap protection after that read. Identical promotion returns `Unchanged` without rewriting the file. Normal analysis and Project Memory synchronization remain read-only with respect to reviewed concepts.
+
 ## Analyze an initiative
 
 Inspect the planned outbound metadata without an API key, authorization, or network call:
@@ -178,4 +199,4 @@ Use `eval-live . --preview`, then `eval-live . --fake-provider`, before authoriz
 
 This foundation does not yet include public API fingerprints, method-level incremental analysis, multi-target-framework expansion, a complete call graph, dependency-injection resolution, source-body retrieval, embeddings, semantic/vector search, automatic implementation, a UI, or complete impact analysis. Initiative retrieval is lexical and graph-bounded; it finds integration candidates, not guaranteed implementation locations. Unsupported or unresolved relationships are omitted instead of guessed. Analysis never runs `dotnet restore` on a target repository; projects that require unavailable local dependencies degrade gracefully.
 
-See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), [the lexical ranking decision](docs/decisions/0007-retrieval-ranking.md), [the live model evaluation decision](docs/decisions/0008-live-model-evaluation.md), [the reviewed concept reranking decision](docs/decisions/0009-reviewed-concept-reranking.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
+See [the initial architecture decision](docs/decisions/0001-local-first-evidence-first.md), [the project-aware analysis decision](docs/decisions/0002-project-aware-semantic-analysis.md), [the incremental analysis decision](docs/decisions/0003-incremental-analysis.md), [the deterministic Project Memory decision](docs/decisions/0004-deterministic-project-memory.md), [the initiative-analysis decision](docs/decisions/0005-llm-initiative-analysis.md), [the evaluation and preview decision](docs/decisions/0006-evaluation-and-remote-preview.md), [the lexical ranking decision](docs/decisions/0007-retrieval-ranking.md), [the live model evaluation decision](docs/decisions/0008-live-model-evaluation.md), [the reviewed concept reranking decision](docs/decisions/0009-reviewed-concept-reranking.md), [the reviewed concept lifecycle decision](docs/decisions/0010-reviewed-concept-lifecycle.md), and [the architecture overview](docs/architecture/README.md) for the boundaries that guide future work.
