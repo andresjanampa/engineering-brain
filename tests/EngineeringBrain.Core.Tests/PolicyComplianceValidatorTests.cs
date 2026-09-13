@@ -15,7 +15,9 @@ public sealed class PolicyComplianceValidatorTests
         var result = new PolicyComplianceValidator().Evaluate([original]);
 
         var governed = Assert.Single(result.Recommendations);
-        var policy = Assert.Single(governed.PolicyResults);
+        var policy = Assert.Single(
+            governed.PolicyResults,
+            value => value.PolicyId == SystemPolicyCatalog.RemoteCompleteRepositoryId);
         Assert.Equal(SystemPolicyCatalog.RemoteCompleteRepositoryId, policy.PolicyId);
         Assert.Equal(1, policy.PolicyVersion);
         Assert.Equal(PolicySourceKind.System, policy.Source);
@@ -34,7 +36,9 @@ public sealed class PolicyComplianceValidatorTests
             EvidenceValidationStatus.Validated,
             Action(PolicyContentScope.BoundedFacts, PolicyAuthorizationMode.Explicit));
 
-        Assert.Equal(PolicyComplianceStatus.Compliant, Policy(result));
+        Assert.Equal(5, Assert.Single(result.Recommendations).PolicyResults.Count);
+        Assert.All(Assert.Single(result.Recommendations).PolicyResults, policy =>
+            Assert.Equal(PolicyComplianceStatus.Compliant, policy.ComplianceStatus));
         Assert.Equal(RecommendationDisposition.Accepted, Disposition(result));
         Assert.Equal(PolicyOutcome.Allowed, result.Outcome);
     }
@@ -52,7 +56,8 @@ public sealed class PolicyComplianceValidatorTests
 
         var result = Evaluate(EvidenceValidationStatus.Validated, action);
 
-        Assert.Equal(PolicyComplianceStatus.NotApplicable, Policy(result));
+        Assert.All(Assert.Single(result.Recommendations).PolicyResults, policy =>
+            Assert.Equal(PolicyComplianceStatus.NotApplicable, policy.ComplianceStatus));
         Assert.Equal(RecommendationDisposition.Accepted, Disposition(result));
     }
 
@@ -79,7 +84,8 @@ public sealed class PolicyComplianceValidatorTests
 
         var result = Evaluate(EvidenceValidationStatus.Validated, action);
 
-        Assert.Equal(PolicyComplianceStatus.NotApplicable, Policy(result));
+        Assert.All(Assert.Single(result.Recommendations).PolicyResults, policy =>
+            Assert.Equal(PolicyComplianceStatus.NotApplicable, policy.ComplianceStatus));
         Assert.Equal(RecommendationDisposition.Accepted, Disposition(result));
         Assert.Equal(PolicyOutcome.Allowed, result.Outcome);
     }
@@ -121,7 +127,8 @@ public sealed class PolicyComplianceValidatorTests
         var result = Evaluate(EvidenceValidationStatus.Validated);
 
         Assert.Empty(result.Recommendations[0].ValidatedRecommendation.Recommendation.PolicyRelevantActions);
-        Assert.Equal(PolicyComplianceStatus.NotApplicable, Policy(result));
+        Assert.All(Assert.Single(result.Recommendations).PolicyResults, policy =>
+            Assert.Equal(PolicyComplianceStatus.NotApplicable, policy.ComplianceStatus));
         Assert.Equal(RecommendationDisposition.Accepted, Disposition(result));
         Assert.Equal(PolicyOutcome.Allowed, result.Outcome);
     }
@@ -144,6 +151,28 @@ public sealed class PolicyComplianceValidatorTests
         Assert.Equal(RecommendationDisposition.Rejected, Disposition(blocked));
         Assert.Equal(PolicyOutcome.Unknown, unknown.Outcome);
         Assert.Equal(RecommendationDisposition.NeedsReview, Disposition(unknown));
+    }
+
+    [Theory]
+    [InlineData(PolicyContentScope.CompleteRepository, "SYS_REMOTE_COMPLETE_REPOSITORY")]
+    [InlineData(PolicyContentScope.RawSnapshot, "SYS_REMOTE_RAW_SNAPSHOT")]
+    [InlineData(PolicyContentScope.SourceBodies, "SYS_REMOTE_SOURCE_BODIES")]
+    [InlineData(PolicyContentScope.Secrets, "SYS_REMOTE_SECRETS")]
+    [InlineData(PolicyContentScope.AbsoluteLocalPaths, "SYS_REMOTE_ABSOLUTE_PATHS")]
+    public void Evaluate_RemoteProhibitedScopeIsRejectedByMatchingPolicy(
+        PolicyContentScope scope,
+        string policyId)
+    {
+        var result = Evaluate(EvidenceValidationStatus.Validated, Action(scope));
+        var recommendation = Assert.Single(result.Recommendations);
+        var matching = Assert.Single(recommendation.PolicyResults, policy => policy.PolicyId == policyId);
+
+        Assert.Equal(PolicyComplianceStatus.Violated, matching.ComplianceStatus);
+        Assert.Equal(RecommendationDisposition.Rejected, recommendation.Disposition);
+        Assert.Equal(PolicyOutcome.Blocked, result.Outcome);
+        Assert.All(
+            recommendation.PolicyResults.Where(policy => policy.PolicyId != policyId),
+            policy => Assert.Equal(PolicyComplianceStatus.Compliant, policy.ComplianceStatus));
     }
 
     private static PolicyGovernanceResult Evaluate(
@@ -178,7 +207,9 @@ public sealed class PolicyComplianceValidatorTests
         null);
 
     private static PolicyComplianceStatus Policy(PolicyGovernanceResult result) =>
-        Assert.Single(Assert.Single(result.Recommendations).PolicyResults).ComplianceStatus;
+        Assert.Single(
+            Assert.Single(result.Recommendations).PolicyResults,
+            policy => policy.PolicyId == SystemPolicyCatalog.RemoteCompleteRepositoryId).ComplianceStatus;
 
     private static RecommendationDisposition Disposition(PolicyGovernanceResult result) =>
         Assert.Single(result.Recommendations).Disposition;
