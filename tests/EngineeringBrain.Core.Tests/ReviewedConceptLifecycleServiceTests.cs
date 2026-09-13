@@ -6,6 +6,137 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class ReviewedConceptLifecycleServiceTests
 {
     [Fact]
+    public async Task RefreshAsync_RebindsRc401ReferenceAndRc402Fingerprint()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedStaleAsync();
+
+        var result = await fixture.RefreshAsync();
+        var refreshed = await fixture.LoadAsync();
+
+        Assert.Equal(ReviewedConceptRefreshOutcome.Refreshed, result.Outcome);
+        Assert.Equal(2, result.RecomputedAssignmentCount);
+        Assert.Equal(1, result.ReboundSourceReferenceCount);
+        Assert.All(refreshed.Declarations.SelectMany(item => item.Assignments), assignment =>
+        {
+            var evidence = fixture.Evidence.Components[assignment.EntityId];
+            Assert.Equal($"{evidence.RelativePath}:{evidence.StartLine}", assignment.SourceReference);
+            Assert.Equal(evidence.SourceFingerprint, assignment.SourceFingerprint);
+        });
+    }
+
+    [Fact]
+    public async Task RefreshAsync_Rc400BlocksAndPreservesCatalogBytes()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync();
+        var before = File.ReadAllBytes(fixture.CatalogPath);
+
+        var result = await fixture.RefreshAsync();
+
+        Assert.Equal(ReviewedConceptRefreshOutcome.Blocked, result.Outcome);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RCL300"
+            && item.EntityId == "entity:missing");
+        Assert.Equal(before, File.ReadAllBytes(fixture.CatalogPath));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_PreservesDeclarationsAssignmentsReviewsAndMigrationHistory()
+    {
+        using var fixture = new RefreshFixture();
+        var original = await fixture.SeedSchemaTwoStaleAsync();
+
+        var result = await fixture.RefreshAsync();
+        var refreshed = await fixture.LoadAsync();
+
+        Assert.Equal(ReviewedConceptRefreshOutcome.Refreshed, result.Outcome);
+        Assert.Equal(original.SchemaVersion, refreshed.SchemaVersion);
+        Assert.Equal(original.IdentityMigrations.Count, refreshed.IdentityMigrations.Count);
+        Assert.Equal(original.IdentityMigrations[0] with { AffectedConceptIds = [] },
+            refreshed.IdentityMigrations[0] with { AffectedConceptIds = [] });
+        Assert.Equal(original.IdentityMigrations[0].AffectedConceptIds,
+            refreshed.IdentityMigrations[0].AffectedConceptIds);
+        Assert.Equal(
+            original.Declarations.OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+                .Select(item => (item.ConceptId, item.Definition, item.Review, item.Provenance)),
+            refreshed.Declarations.OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+                .Select(item => (item.ConceptId, item.Definition, item.Review, item.Provenance)));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_RequiresExactTransformedAssignmentSetAndValidResolution()
+    {
+        using var fixture = new RefreshFixture();
+        var original = await fixture.SeedStaleAsync();
+        var expected = original.Declarations
+            .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+                (declaration.ConceptId, assignment.EntityId)))
+            .OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+            .ThenBy(item => item.EntityId, StringComparer.Ordinal)
+            .ToArray();
+
+        var result = await fixture.RefreshAsync();
+        var refreshed = await fixture.LoadAsync();
+        var actual = refreshed.Declarations
+            .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+                (declaration.ConceptId, assignment.EntityId)))
+            .OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+            .ThenBy(item => item.EntityId, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, actual);
+        Assert.Equal(original.Declarations.Count, result.DeclarationCount);
+        Assert.Equal(original.Declarations.Sum(item => item.Assignments.Count), result.AssignmentCount);
+        Assert.Equal(ReviewedConceptResolutionStatus.Valid,
+            (await fixture.Service.GetStatusAsync("demo", fixture.BranchRoot, fixture.Evidence)).Status);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_RepeatedCurrentCatalogReturnsUnchangedWithoutTimestampChurn()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedCurrentAsync();
+        var before = File.GetLastWriteTimeUtc(fixture.CatalogPath);
+
+        var result = await fixture.RefreshAsync();
+
+        Assert.Equal(ReviewedConceptRefreshOutcome.Unchanged, result.Outcome);
+        Assert.Equal(before, File.GetLastWriteTimeUtc(fixture.CatalogPath));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task RefreshAsync_DirtyOrDetachedGitStateBlocksMutation(bool dirty, bool detached)
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedStaleAsync();
+        var before = File.ReadAllBytes(fixture.CatalogPath);
+        var git = new GitInfo(true, detached ? "(detached HEAD)" : "main", "head", null, !dirty);
+
+        var result = await fixture.RefreshAsync(analyzedGit: git);
+
+        Assert.Equal(ReviewedConceptRefreshOutcome.Blocked, result.Outcome);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RCL200");
+        Assert.Equal(before, File.ReadAllBytes(fixture.CatalogPath));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WriterFingerprintConflictPreservesConcurrentWinner()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedStaleAsync();
+        const string winner = "{\"winner\":true}";
+        var git = new MutatingGitInfoProvider(fixture.CatalogPath, winner, fixture.Git);
+
+        var result = await fixture.RefreshAsync(gitInfo: git);
+
+        Assert.Equal(ReviewedConceptRefreshOutcome.Blocked, result.Outcome);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RCL401");
+        Assert.Equal(winner, File.ReadAllText(fixture.CatalogPath));
+    }
+
+    [Fact]
     public async Task PromoteAsync_FeatureToMainPreservesTwentyFiveReviewedDeclarations()
     {
         using var fixture = new PromotionFixture();
@@ -858,6 +989,123 @@ public sealed class ReviewedConceptLifecycleServiceTests
                 "v2",
                 declarations);
         }
+    }
+
+    private sealed class RefreshFixture : IDisposable
+    {
+        private readonly TemporaryDirectory _root = new();
+
+        public RefreshFixture()
+        {
+            RepositoryRoot = Path.Combine(_root.Path, "repository");
+            Directory.CreateDirectory(RepositoryRoot);
+            File.WriteAllText(Path.Combine(RepositoryRoot, "README.md"), "# Test repository\n");
+            BranchRoot = Path.Combine(_root.Path, "external", "main");
+            Evidence = ReviewedConceptTestData.Evidence();
+            Git = new GitInfo(true, Evidence.Branch, "head", null, true);
+            Service = new ReviewedConceptLifecycleService(gitInfo: new StaticGitInfoProvider(Git));
+        }
+
+        public string RepositoryRoot { get; }
+        public string BranchRoot { get; }
+        public string CatalogPath => new LocalReviewedConceptStore().GetPath(BranchRoot);
+        public ReviewedConceptEvidenceContext Evidence { get; }
+        public GitInfo Git { get; }
+        public ReviewedConceptLifecycleService Service { get; }
+
+        public Task<ReviewedConceptRefreshResult> RefreshAsync(
+            GitInfo? analyzedGit = null,
+            IGitInfoProvider? gitInfo = null) =>
+            new ReviewedConceptLifecycleService(
+                gitInfo: gitInfo ?? new StaticGitInfoProvider(Git)).RefreshAsync(
+                "demo",
+                RepositoryRoot,
+                BranchRoot,
+                Evidence,
+                analyzedGit ?? Git);
+
+        public async Task<ReviewedConceptCatalog> SeedStaleAsync()
+        {
+            var catalog = ReviewedConceptTestData.Catalog();
+            var first = catalog.Declarations[0] with
+            {
+                Assignments =
+                [
+                    catalog.Declarations[0].Assignments[0] with
+                    {
+                        SourceReference = "src/Old.cs:1",
+                        SourceFingerprint = "stale"
+                    }
+                ]
+            };
+            first = ReviewedConceptTestData.WithFingerprint(first);
+            var second = catalog.Declarations[1] with
+            {
+                Assignments =
+                [
+                    catalog.Declarations[1].Assignments[0] with { SourceFingerprint = "stale" }
+                ]
+            };
+            second = ReviewedConceptTestData.WithFingerprint(second);
+            catalog = catalog with { Declarations = [first, second] };
+            await WriteAsync(BranchRoot, ReviewedConceptSerializer.Serialize(catalog));
+            return catalog;
+        }
+
+        public async Task SeedCurrentAsync()
+        {
+            await WriteAsync(BranchRoot,
+                ReviewedConceptSerializer.Serialize(ReviewedConceptTestData.Catalog()));
+        }
+
+        public async Task SeedMissingEntityAsync()
+        {
+            var catalog = ReviewedConceptTestData.Catalog();
+            var declaration = catalog.Declarations[0] with
+            {
+                Assignments = [new ReviewedConceptAssignment("entity:missing", "src/Missing.cs:1", "missing")]
+            };
+            declaration = ReviewedConceptTestData.WithFingerprint(declaration);
+            catalog = catalog with { Declarations = [declaration, .. catalog.Declarations.Skip(1)] };
+            await WriteAsync(BranchRoot, ReviewedConceptSerializer.Serialize(catalog));
+        }
+
+        public async Task<ReviewedConceptCatalog> SeedSchemaTwoStaleAsync()
+        {
+            var catalog = await SeedStaleAsync();
+            var component = Evidence.Components["entity:business-service"];
+            var migration = new ReviewedConceptIdentityMigration(
+                catalog.RepositoryId,
+                catalog.Branch,
+                catalog.BranchKey,
+                "entity:old",
+                component.EntityId,
+                [catalog.Declarations[0].ConceptId],
+                "previous",
+                $"{component.RelativePath}:{component.StartLine}",
+                component.SourceFingerprint,
+                new ReviewedConceptReview(
+                    "reviewer",
+                    1,
+                    new DateTimeOffset(2026, 9, 13, 12, 0, 0, TimeSpan.Zero)),
+                "pending");
+            migration = migration with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(migration)
+            };
+            catalog = catalog with { SchemaVersion = 2, IdentityMigrations = [migration] };
+            await WriteAsync(BranchRoot, ReviewedConceptSerializer.Serialize(catalog));
+            return catalog;
+        }
+
+        public async Task<ReviewedConceptCatalog> LoadAsync()
+        {
+            var loaded = await new LocalReviewedConceptStore().LoadAsync(BranchRoot);
+            Assert.Equal(ReviewedConceptLoadStatus.Loaded, loaded.Status);
+            return loaded.Catalog!;
+        }
+
+        public void Dispose() => _root.Dispose();
     }
 
     private sealed class StaticGitInfoProvider(GitInfo info) : IGitInfoProvider

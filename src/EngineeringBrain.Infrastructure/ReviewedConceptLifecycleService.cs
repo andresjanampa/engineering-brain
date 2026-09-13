@@ -38,6 +38,139 @@ public sealed class ReviewedConceptLifecycleService
         CancellationToken cancellationToken = default) =>
         InspectAsync(repositoryName, branchKnowledgeLocation, evidence, cancellationToken);
 
+    public async Task<ReviewedConceptRefreshResult> RefreshAsync(
+        string repositoryName,
+        string repositoryRoot,
+        string branchKnowledgeLocation,
+        ReviewedConceptEvidenceContext evidence,
+        GitInfo analyzedGit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(evidence);
+        ArgumentNullException.ThrowIfNull(analyzedGit);
+
+        var catalogPath = _reader.GetPath(branchKnowledgeLocation);
+        if (!IsStableTarget(analyzedGit, evidence))
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, null,
+                [Diagnostic("RCL200", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target must be the current clean non-detached repository branch.")]);
+        }
+
+        var load = await _reader.LoadAsync(branchKnowledgeLocation, cancellationToken);
+        if (load.Status == ReviewedConceptLoadStatus.Absent)
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, null,
+                [Diagnostic("RCL101", ReviewedConceptDiagnosticScope.Catalog,
+                    "Current reviewed concept catalog is absent.")]);
+        }
+
+        if (load.Status != ReviewedConceptLoadStatus.Loaded || load.Catalog is null)
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, load.ContentHash,
+                load.Diagnostics.Append(Diagnostic("RCL102", ReviewedConceptDiagnosticScope.Catalog,
+                    "Current reviewed concept catalog is invalid.")));
+        }
+
+        var identity = new ReviewedConceptCatalogIdentity(
+            evidence.RepositoryId, evidence.Branch, evidence.BranchKey);
+        var integrity = _validator.ValidateIntegrity(load.Catalog, identity);
+        var canonical = ReviewedConceptSerializer.CreateCatalogFingerprint(load.Catalog);
+        if (!integrity.CatalogIsValid
+            || integrity.Diagnostics.Count > 0
+            || !string.Equals(load.ContentHash, canonical, StringComparison.Ordinal))
+        {
+            IEnumerable<ReviewedConceptDiagnostic> diagnostics = integrity.Diagnostics;
+            if (!string.Equals(load.ContentHash, canonical, StringComparison.Ordinal))
+            {
+                diagnostics = diagnostics.Append(Diagnostic(
+                    "RCL103", ReviewedConceptDiagnosticScope.Catalog,
+                    "Reviewed concept catalog serialization is not canonical."));
+            }
+
+            return BlockedRefresh(repositoryName, evidence, catalogPath, load.ContentHash, diagnostics,
+                load.Catalog);
+        }
+
+        var rebuild = RebindAllAssignments(load.Catalog, evidence);
+        if (rebuild.Diagnostics.Count > 0)
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, load.ContentHash,
+                rebuild.Diagnostics, load.Catalog);
+        }
+
+        var candidate = load.Catalog with
+        {
+            SourceSnapshotSchema = evidence.SourceSnapshotSchema,
+            SourceAnalyzerVersion = evidence.SourceAnalyzerVersion,
+            Declarations = rebuild.Declarations
+        };
+        var candidateFingerprint = ReviewedConceptSerializer.CreateCatalogFingerprint(candidate);
+        var candidateLoad = new ReviewedConceptLoadResult(
+            ReviewedConceptLoadStatus.Loaded, catalogPath, candidateFingerprint, candidate, []);
+        var candidateValidation = _validator.Validate(candidate, evidence);
+        var candidateResolution = _resolver.Resolve(candidateLoad, candidateValidation, evidence);
+        var expectedIdentities = AssignmentIdentities(load.Catalog);
+        var actualIdentities = AssignmentIdentities(candidate);
+        if (candidateResolution.Status != ReviewedConceptResolutionStatus.Valid
+            || !expectedIdentities.SequenceEqual(actualIdentities, StringComparer.Ordinal)
+            || candidate.Declarations.Count != load.Catalog.Declarations.Count
+            || candidate.Declarations.Sum(item => item.Assignments.Count)
+                != load.Catalog.Declarations.Sum(item => item.Assignments.Count))
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, load.ContentHash,
+                candidateResolution.Diagnostics.Append(Diagnostic(
+                    "RCL301", ReviewedConceptDiagnosticScope.Catalog,
+                    "Refreshed reviewed concept catalog failed current evidence validation.")),
+                load.Catalog);
+        }
+
+        ReviewedConceptWriteResult write;
+        try
+        {
+            write = await _writer.WriteAsync(
+                branchKnowledgeLocation,
+                candidate,
+                load.ContentHash,
+                token => ValidateTargetBeforeCommitAsync(repositoryRoot, analyzedGit, token),
+                cancellationToken);
+        }
+        catch (ReviewedConceptWriteConflictException)
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, load.ContentHash,
+                [Diagnostic("RCL401", ReviewedConceptDiagnosticScope.Catalog,
+                    "Reviewed concept catalog changed or is locked.")], load.Catalog);
+        }
+        catch (ReviewedConceptTargetChangedException)
+        {
+            return BlockedRefresh(repositoryName, evidence, catalogPath, load.ContentHash,
+                [Diagnostic("RCL201", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target repository state changed before refresh commit.")], load.Catalog);
+        }
+
+        return new ReviewedConceptRefreshResult(
+            write.Outcome == ReviewedConceptWriteOutcome.Unchanged
+                ? ReviewedConceptRefreshOutcome.Unchanged
+                : ReviewedConceptRefreshOutcome.Refreshed,
+            evidence.RepositoryId,
+            repositoryName,
+            evidence.Branch,
+            evidence.BranchKey,
+            write.Path,
+            load.ContentHash,
+            write.Fingerprint,
+            candidate.Declarations.Count,
+            candidate.Declarations.Sum(item => item.Assignments.Count),
+            candidateResolution.Profiles.Count,
+            rebuild.RecomputedAssignmentCount,
+            candidate.Declarations.Count,
+            rebuild.ReboundSourceReferenceCount,
+            0,
+            []);
+    }
+
     public async Task<ReviewedConceptPromotionResult> PromoteAsync(
         string repositoryName,
         string repositoryRoot,
@@ -357,6 +490,125 @@ public sealed class ReviewedConceptLifecycleService
             ordered);
     }
 
+    private static ReviewedConceptRefreshResult BlockedRefresh(
+        string repositoryName,
+        ReviewedConceptEvidenceContext evidence,
+        string catalogPath,
+        string? previousFingerprint,
+        IEnumerable<ReviewedConceptDiagnostic> diagnostics,
+        ReviewedConceptCatalog? catalog = null)
+    {
+        var ordered = OrderDiagnostics(diagnostics);
+        return new ReviewedConceptRefreshResult(
+            ReviewedConceptRefreshOutcome.Blocked,
+            evidence.RepositoryId,
+            repositoryName,
+            evidence.Branch,
+            evidence.BranchKey,
+            catalogPath,
+            previousFingerprint,
+            null,
+            catalog?.Declarations.Count ?? 0,
+            catalog?.Declarations.Sum(item => item.Assignments.Count) ?? 0,
+            0,
+            0,
+            0,
+            0,
+            ordered.Count(item => item.Scope == ReviewedConceptDiagnosticScope.Assignment),
+            ordered);
+    }
+
+    private static ReviewedConceptAssignmentRebuild RebindAllAssignments(
+        ReviewedConceptCatalog catalog,
+        ReviewedConceptEvidenceContext evidence)
+    {
+        var declarations = new List<ReviewedConceptDeclaration>();
+        var diagnostics = new List<ReviewedConceptDiagnostic>();
+        var reboundSourceReferences = 0;
+        var recomputedAssignments = 0;
+        foreach (var declaration in catalog.Declarations)
+        {
+            var assignments = new List<ReviewedConceptAssignment>();
+            foreach (var assignment in declaration.Assignments)
+            {
+                if (!evidence.Components.TryGetValue(assignment.EntityId, out var component))
+                {
+                    diagnostics.Add(Diagnostic(
+                        "RCL300", ReviewedConceptDiagnosticScope.Assignment,
+                        "Reviewed assignment entity is absent from current evidence.",
+                        declaration.ConceptId, assignment.EntityId));
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(component.RelativePath)
+                    || component.StartLine <= 0
+                    || string.IsNullOrWhiteSpace(component.SourceFingerprint))
+                {
+                    diagnostics.Add(Diagnostic(
+                        "RCL301", ReviewedConceptDiagnosticScope.Assignment,
+                        "Current component evidence is incomplete.",
+                        declaration.ConceptId, assignment.EntityId));
+                    continue;
+                }
+
+                var sourceReference = $"{component.RelativePath}:{component.StartLine}";
+                if (!string.Equals(sourceReference, assignment.SourceReference, StringComparison.Ordinal))
+                {
+                    reboundSourceReferences++;
+                }
+
+                assignments.Add(new ReviewedConceptAssignment(
+                    assignment.EntityId,
+                    sourceReference,
+                    component.SourceFingerprint));
+                recomputedAssignments++;
+            }
+
+            var draft = declaration with { Assignments = assignments, Fingerprint = string.Empty };
+            declarations.Add(draft with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(draft)
+            });
+        }
+
+        return new ReviewedConceptAssignmentRebuild(
+            declarations,
+            diagnostics,
+            recomputedAssignments,
+            reboundSourceReferences);
+    }
+
+    private static IReadOnlyList<string> AssignmentIdentities(ReviewedConceptCatalog catalog) => catalog.Declarations
+        .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+            $"{declaration.ConceptId}\0{assignment.EntityId}"))
+        .Order(StringComparer.Ordinal)
+        .ToArray();
+
+    private static bool IsStableTarget(GitInfo git, ReviewedConceptEvidenceContext evidence) =>
+        git.IsRepository
+        && !git.IsDetachedHead
+        && !string.IsNullOrWhiteSpace(git.Branch)
+        && string.Equals(git.Branch, evidence.Branch, StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(git.HeadCommit)
+        && git.IsWorkingTreeClean == true
+        && string.Equals(evidence.BranchKey,
+            KnowledgeIdentity.CreateBranchKey(evidence.Branch), StringComparison.Ordinal);
+
+    private async Task ValidateTargetBeforeCommitAsync(
+        string repositoryRoot,
+        GitInfo analyzedGit,
+        CancellationToken cancellationToken)
+    {
+        var currentGit = await _gitInfo.GetInfoAsync(repositoryRoot, cancellationToken);
+        if (currentGit.IsDetachedHead
+            || !string.Equals(currentGit.Branch, analyzedGit.Branch, StringComparison.Ordinal)
+            || !string.Equals(currentGit.HeadCommit, analyzedGit.HeadCommit, StringComparison.Ordinal)
+            || currentGit.IsWorkingTreeClean != true)
+        {
+            throw new ReviewedConceptTargetChangedException();
+        }
+    }
+
     private static ReviewedConceptDiagnostic Diagnostic(
         string code,
         ReviewedConceptDiagnosticScope scope,
@@ -457,6 +709,12 @@ public sealed class ReviewedConceptLifecycleService
         .ThenBy(item => item.Code, StringComparer.Ordinal)
         .ToArray();
 }
+
+internal sealed record ReviewedConceptAssignmentRebuild(
+    IReadOnlyList<ReviewedConceptDeclaration> Declarations,
+    IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics,
+    int RecomputedAssignmentCount,
+    int ReboundSourceReferenceCount);
 
 internal sealed class ReviewedConceptTargetChangedException : InvalidOperationException
 {
