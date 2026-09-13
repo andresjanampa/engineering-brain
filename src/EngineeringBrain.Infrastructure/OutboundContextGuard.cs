@@ -232,7 +232,7 @@ public sealed partial class OutboundContextGuard
             }
             catch (JsonException)
             {
-                start = end;
+                // Continue inside the failed range so valid nested objects remain candidates.
             }
         }
     }

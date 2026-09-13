@@ -232,6 +232,62 @@ public sealed class OutboundContextGuardTests
         Assert.Empty(_guard.Inspect(Request(context.Content), context));
     }
 
+    [Theory]
+    [InlineData(
+        "{payload:{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "{payload:{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}}",
+        PolicyContentScope.CompleteRepository)]
+    [InlineData(
+        "Evidence: {payload:{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "```json\n{payload:{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}}\n```",
+        PolicyContentScope.CompleteRepository)]
+    [InlineData(
+        "{\"outer\":{payload:{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}}",
+        PolicyContentScope.RawSnapshot)]
+    public void Inspect_MalformedBalancedWrapperCannotHideProhibitedNestedJson(
+        string payload,
+        PolicyContentScope expectedCategory)
+    {
+        AssertFinding(_guard.Inspect(Request(payload)), expectedCategory);
+    }
+
+    [Theory]
+    [InlineData(
+        "{payload:invalid} later {\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "{payload:invalid} later {\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}",
+        PolicyContentScope.CompleteRepository)]
+    public void Inspect_MalformedJsonBeforeIndependentProhibitedCandidateIsBlocked(
+        string payload,
+        PolicyContentScope expectedCategory)
+    {
+        AssertFinding(_guard.Inspect(Request(payload)), expectedCategory);
+    }
+
+    [Theory]
+    [InlineData("{payload:invalid}")]
+    [InlineData("Prose {with {many} balanced} braces")]
+    [InlineData("{\"metadata\":{\"repository\":\"engineering-brain\",\"counts\":{\"projects\":6}}}")]
+    [InlineData("{payload:{\"metadata\":true}}")]
+    public void Inspect_MalformedOrHarmlessNestedJsonWithoutProhibitedShapeIsAllowed(string payload)
+    {
+        Assert.Empty(_guard.Inspect(Request(payload)));
+    }
+
+    [Fact]
+    public void Inspect_JsonStringBracesCannotHideProhibitedNestedJson()
+    {
+        const string payload =
+            "{\"text\":\"escaped quote: \\\" and braces { }\",\"payload\":{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}";
+
+        AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.RawSnapshot);
+    }
+
     [Fact]
     public void Inspect_ExcessiveJsonNestingFailsClosedWithoutRetention()
     {
