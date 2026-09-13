@@ -34,4 +34,26 @@ public sealed class ReviewedConceptModelTests
         Assert.All(evidence.Components.Values, item =>
             Assert.False(string.IsNullOrWhiteSpace(item.SourceFingerprint)));
     }
+
+    [Fact]
+    public void FromSnapshot_MatchesEvidenceFromMemory()
+    {
+        var snapshot = ProjectMemoryTestFactory.Create();
+        var build = new ProjectMemoryBuilder().Build(snapshot);
+
+        var direct = ReviewedConceptEvidenceContext.FromSnapshot(snapshot, build.Manifest);
+        var fromMemory = ReviewedConceptEvidenceContext.FromMemory(
+            ReviewedConceptTestData.Memory(snapshot, build.Manifest));
+
+        Assert.Equal(fromMemory.RepositoryId, direct.RepositoryId);
+        Assert.Equal(fromMemory.Branch, direct.Branch);
+        Assert.Equal(fromMemory.BranchKey, direct.BranchKey);
+        Assert.Equal(fromMemory.SourceSnapshotSchema, direct.SourceSnapshotSchema);
+        Assert.Equal(fromMemory.SourceAnalyzerVersion, direct.SourceAnalyzerVersion);
+        Assert.Equal(
+            fromMemory.Components.OrderBy(item => item.Key)
+                .Select(item => (item.Key, item.Value)).ToArray(),
+            direct.Components.OrderBy(item => item.Key)
+                .Select(item => (item.Key, item.Value)).ToArray());
+    }
 }

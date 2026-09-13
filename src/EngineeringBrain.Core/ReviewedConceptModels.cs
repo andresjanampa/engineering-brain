@@ -98,9 +98,19 @@ public sealed record ReviewedConceptEvidenceContext(
     {
         ArgumentNullException.ThrowIfNull(memory);
 
-        var entities = memory.SourceSnapshot.Entities
+        return FromSnapshot(memory.SourceSnapshot, memory.Manifest);
+    }
+
+    public static ReviewedConceptEvidenceContext FromSnapshot(
+        RepositorySnapshot snapshot,
+        ProjectMemoryManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        var entities = snapshot.Entities
             .ToDictionary(item => item.Id, StringComparer.Ordinal);
-        var components = memory.Manifest.Notes
+        var components = manifest.Notes
             .Where(note => note.Kind == KnowledgeNoteKind.Component && note.SourceId is not null)
             .Where(note => entities.ContainsKey(note.SourceId!))
             .OrderBy(note => note.SourceId, StringComparer.Ordinal)
@@ -115,11 +125,11 @@ public sealed record ReviewedConceptEvidenceContext(
                 StringComparer.Ordinal);
 
         return new ReviewedConceptEvidenceContext(
-            memory.Manifest.RepositoryId,
-            memory.Manifest.Branch,
-            memory.Manifest.BranchKey,
-            memory.Manifest.SourceSnapshotSchema,
-            memory.Manifest.SourceAnalyzerVersion,
+            manifest.RepositoryId,
+            manifest.Branch,
+            manifest.BranchKey,
+            manifest.SourceSnapshotSchema,
+            manifest.SourceAnalyzerVersion,
             components);
     }
 }
