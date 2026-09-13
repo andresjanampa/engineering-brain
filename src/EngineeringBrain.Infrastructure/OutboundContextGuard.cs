@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using EngineeringBrain.Core;
@@ -7,7 +8,7 @@ namespace EngineeringBrain.Infrastructure;
 public sealed partial class OutboundContextGuard
 {
     private const int MaximumFindingCount = 99;
-    private const int MaximumCFamilyBodyLookaheadLines = 64;
+    private const int MaximumCFamilyHeaderCharacters = 16_384;
     private const int MaximumInspectionCharacters = 1_000_000;
     private const int MaximumJsonCandidates = 32;
     private const int MaximumJsonNestingDepth = 64;
@@ -404,49 +405,74 @@ public sealed partial class OutboundContextGuard
     {
         var lines = content.Split('\n');
         var count = 0;
+        var state = CFamilyScanState.Searching;
+        var header = new StringBuilder();
+        var inBlockComment = false;
 
-        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        foreach (var rawLine in lines)
         {
-            var line = lines[lineIndex].TrimEnd('\r');
-            var openingBrace = line.IndexOf('{');
-            var header = openingBrace >= 0 ? line[..openingBrace] : line;
-            if (!IsCFamilyDeclarationHeader(header))
+            var line = StripCFamilyComments(rawLine.TrimEnd('\r'), ref inBlockComment);
+
+            if (state == CFamilyScanState.Searching)
             {
+                var declarationStart = FindCFamilyDeclarationStart(line);
+                if (declarationStart < 0)
+                {
+                    continue;
+                }
+
+                header.Clear();
+                state = CFamilyScanState.CollectingHeader;
+                line = line[declarationStart..];
+            }
+
+            if (state == CFamilyScanState.CollectingHeader)
+            {
+                var openingBrace = line.IndexOf('{');
+                var terminator = line.IndexOf(';');
+                var headerEnd = openingBrace >= 0 ? openingBrace : line.Length;
+                if (terminator >= 0 && terminator < headerEnd)
+                {
+                    ResetCFamilyScan();
+                    continue;
+                }
+
+                AppendCFamilyHeader(header, line[..headerEnd]);
+                if (openingBrace < 0)
+                {
+                    continue;
+                }
+
+                if (!IsCFamilyDeclarationHeader(header.ToString()))
+                {
+                    ResetCFamilyScan();
+                    continue;
+                }
+
+                state = CFamilyScanState.WaitingForBodyEvidence;
+                line = line[(openingBrace + 1)..];
+            }
+
+            if (HasCFamilyBodyContent(line))
+            {
+                count++;
+                ResetCFamilyScan();
                 continue;
             }
 
-            var braceLineIndex = lineIndex;
-            string contentAfterBrace;
-            if (openingBrace >= 0)
+            if (line.Contains('}'))
             {
-                contentAfterBrace = line[(openingBrace + 1)..];
-            }
-            else
-            {
-                braceLineIndex = NextNonEmptyLine(lines, lineIndex + 1);
-                if (braceLineIndex < 0)
-                {
-                    continue;
-                }
-
-                var braceLine = lines[braceLineIndex].TrimEnd('\r');
-                openingBrace = braceLine.IndexOf('{');
-                if (openingBrace < 0 || !string.IsNullOrWhiteSpace(braceLine[..openingBrace]))
-                {
-                    continue;
-                }
-
-                contentAfterBrace = braceLine[(openingBrace + 1)..];
-            }
-
-            if (HasCFamilyBodyContent(contentAfterBrace)
-                || HasCFamilyBodyLine(lines, braceLineIndex + 1))
-            {
-                count++;
+                ResetCFamilyScan();
             }
         }
 
         return count;
+
+        void ResetCFamilyScan()
+        {
+            state = CFamilyScanState.Searching;
+            header.Clear();
+        }
     }
 
     private static bool IsCFamilyDeclarationHeader(string header)
@@ -500,10 +526,10 @@ public sealed partial class OutboundContextGuard
         }
 
         var openParenthesis = text.IndexOf('(');
-        var closeParenthesis = text.LastIndexOf(')');
+        var closeParenthesis = FindMatchingParenthesis(text, openParenthesis);
         if (openParenthesis <= 0
             || closeParenthesis < openParenthesis
-            || !string.IsNullOrWhiteSpace(text[(closeParenthesis + 1)..]))
+            || !IsCFamilyDeclarationSuffix(text[(closeParenthesis + 1)..]))
         {
             return false;
         }
@@ -521,13 +547,186 @@ public sealed partial class OutboundContextGuard
             && CFamilyMemberName().IsMatch(prefixTokens[^1]);
     }
 
-    private static int NextNonEmptyLine(string[] lines, int startIndex)
+    private static int FindCFamilyDeclarationStart(string line)
     {
-        for (var index = startIndex;
-             index < lines.Length && index - startIndex < MaximumCFamilyBodyLookaheadLines;
-             index++)
+        if (IsPlausibleCFamilyDeclarationStart(line))
         {
-            if (!string.IsNullOrWhiteSpace(lines[index]))
+            return 0;
+        }
+
+        foreach (var modifier in new[] { "public", "private", "protected", "internal" })
+        {
+            var searchStart = 0;
+            while (searchStart < line.Length)
+            {
+                var index = line.IndexOf(modifier, searchStart, StringComparison.Ordinal);
+                if (index < 0)
+                {
+                    break;
+                }
+
+                var beforeIsBoundary = index == 0 || !IsCFamilyIdentifierCharacter(line[index - 1]);
+                var after = index + modifier.Length;
+                var afterIsBoundary = after == line.Length || !IsCFamilyIdentifierCharacter(line[after]);
+                if (beforeIsBoundary && afterIsBoundary
+                    && IsPlausibleCFamilyDeclarationStart(line[index..]))
+                {
+                    return index;
+                }
+
+                searchStart = after;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsPlausibleCFamilyDeclarationStart(string value)
+    {
+        var text = value.TrimStart();
+        if (text.Length == 0 || text.StartsWith("//", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var openingBrace = text.IndexOf('{');
+        var semicolon = text.IndexOf(';');
+        var end = openingBrace >= 0 ? openingBrace : semicolon >= 0 ? semicolon : text.Length;
+        var candidate = text[..end].Trim();
+        var tokens = candidate.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var firstSignificant = 0;
+        while (firstSignificant < tokens.Length && IsCFamilyModifier(tokens[firstSignificant]))
+        {
+            firstSignificant++;
+        }
+
+        if (firstSignificant >= tokens.Length)
+        {
+            return false;
+        }
+
+        if (IsCFamilyTypeKeyword(tokens[firstSignificant]))
+        {
+            return true;
+        }
+
+        var openParenthesis = candidate.IndexOf('(');
+        if (openParenthesis <= 0)
+        {
+            return false;
+        }
+
+        var prefixTokens = candidate[..openParenthesis]
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var methodStart = 0;
+        while (methodStart < prefixTokens.Length && IsCFamilyModifier(prefixTokens[methodStart]))
+        {
+            methodStart++;
+        }
+
+        return methodStart < prefixTokens.Length
+            && !IsCFamilyControlKeyword(prefixTokens[methodStart])
+            && CFamilyMemberName().IsMatch(prefixTokens[^1]);
+    }
+
+    private static void AppendCFamilyHeader(StringBuilder header, string line)
+    {
+        var value = line.Trim();
+        if (value.Length == 0)
+        {
+            return;
+        }
+
+        var separatorLength = header.Length == 0 ? 0 : 1;
+        if (header.Length + separatorLength + value.Length > MaximumCFamilyHeaderCharacters)
+        {
+            throw new InvalidDataException("Outbound C-family header limit exceeded.");
+        }
+
+        if (separatorLength != 0)
+        {
+            header.Append(' ');
+        }
+
+        header.Append(value);
+    }
+
+    private static string StripCFamilyComments(string line, ref bool inBlockComment)
+    {
+        var result = new StringBuilder(line.Length);
+        var quote = '\0';
+        var escaped = false;
+
+        for (var index = 0; index < line.Length; index++)
+        {
+            var character = line[index];
+            var next = index + 1 < line.Length ? line[index + 1] : '\0';
+
+            if (inBlockComment)
+            {
+                if (character == '*' && next == '/')
+                {
+                    inBlockComment = false;
+                    index++;
+                }
+
+                continue;
+            }
+
+            if (quote != '\0')
+            {
+                result.Append(character);
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (character == '\\')
+                {
+                    escaped = true;
+                }
+                else if (character == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (character is '\'' or '"')
+            {
+                quote = character;
+                result.Append(character);
+                continue;
+            }
+
+            if (character == '/' && next == '/')
+            {
+                break;
+            }
+
+            if (character == '/' && next == '*')
+            {
+                inBlockComment = true;
+                index++;
+                continue;
+            }
+
+            result.Append(character);
+        }
+
+        return result.ToString();
+    }
+
+    private static int FindMatchingParenthesis(string value, int openingParenthesis)
+    {
+        var depth = 0;
+        for (var index = openingParenthesis; index < value.Length; index++)
+        {
+            if (value[index] == '(')
+            {
+                depth++;
+            }
+            else if (value[index] == ')' && --depth == 0)
             {
                 return index;
             }
@@ -536,29 +735,26 @@ public sealed partial class OutboundContextGuard
         return -1;
     }
 
-    private static bool HasCFamilyBodyLine(string[] lines, int startIndex)
+    private static bool IsCFamilyDeclarationSuffix(string value)
     {
-        for (var index = startIndex;
-             index < lines.Length && index - startIndex < MaximumCFamilyBodyLookaheadLines;
-             index++)
-        {
-            var line = lines[index].TrimEnd('\r');
-            if (HasCFamilyBodyContent(line))
-            {
-                return true;
-            }
-
-            if (line.Contains('}'))
-            {
-                return false;
-            }
-        }
-
-        return false;
+        var suffix = value.Trim();
+        return suffix.Length == 0
+            || suffix.StartsWith("where ", StringComparison.Ordinal)
+            || suffix.StartsWith(": base(", StringComparison.Ordinal)
+            || suffix.StartsWith(": this(", StringComparison.Ordinal);
     }
+
+    private static bool IsCFamilyIdentifierCharacter(char value) => char.IsLetterOrDigit(value) || value == '_';
 
     private static bool HasCFamilyBodyContent(string value) => value.Any(character =>
         !char.IsWhiteSpace(character) && character is not '{' and not '}' and not ';');
+
+    private enum CFamilyScanState
+    {
+        Searching,
+        CollectingHeader,
+        WaitingForBodyEvidence
+    }
 
     private static bool IsCFamilyModifier(string value) => value is
         "public" or "private" or "protected" or "internal" or "static" or "abstract" or "sealed"

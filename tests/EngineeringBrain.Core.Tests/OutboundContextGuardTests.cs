@@ -367,6 +367,36 @@ public sealed class OutboundContextGuardTests
     }
 
     [Theory]
+    [InlineData("public void Save(\n    string value)\n{\n    return;\n}")]
+    [InlineData("public Task<T> SaveAsync<T>(\n    T value)\n{\n    return Task.FromResult(value);\n}")]
+    [InlineData("public T Save<T>(\n    T value)\n    where T : class\n{\n    return value;\n}")]
+    [InlineData("public Customer(\n    string name)\n{\n    Initialize();\n}")]
+    [InlineData("public Customer(\n    string name)\n    : base(name)\n{\n    Initialize();\n}")]
+    [InlineData("public Customer(\n    string name)\n    : this()\n{\n    Initialize();\n}")]
+    public void Inspect_MultilineCFamilyDeclarationWithBodyIsBlocked(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Fact]
+    public void Inspect_WhitespaceAndCommentsBetweenDeclarationAndBraceCannotHideBody()
+    {
+        var padding = string.Join('\n', Enumerable.Repeat("// harmless padding", 65));
+        var sourceBody = $"class Customer\n{padding}\n{{\n    int Value;\n}}";
+
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Fact]
+    public void Inspect_WhitespaceAndCommentsBetweenBraceAndBodyCannotHideBody()
+    {
+        var padding = string.Join('\n', Enumerable.Repeat("/* harmless padding */", 65));
+        var sourceBody = $"class Customer\n{{\n{padding}\n    int Value;\n}}";
+
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
     [InlineData("public class Customer {")]
     [InlineData("class Customer")]
     [InlineData("void Save();")]
@@ -377,6 +407,29 @@ public sealed class OutboundContextGuardTests
     public void Inspect_IncompleteCFamilyDeclarationOrSafeReferenceIsAllowed(string content)
     {
         Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Theory]
+    [InlineData("public void Save(\n    string value);")]
+    [InlineData("public Task<T> SaveAsync<T>(\n    T value)\n    where T : class;")]
+    [InlineData("public Customer(\n    string name)")]
+    [InlineData("public Customer(\n    string name)\n    : base(name);")]
+    [InlineData("class Customer\n{\n    // comment only\n}")]
+    [InlineData("class Customer\n{\n    /* comment only */\n}")]
+    [InlineData("Call Process(input) when the initiative is ready.")]
+    public void Inspect_MultilineSignatureOrCommentOnlyBlockIsAllowed(string content)
+    {
+        Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveCFamilyHeaderFailsClosed()
+    {
+        var content = "public void Save(" + new string('x', 16_385);
+
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
     }
 
     [Fact]
