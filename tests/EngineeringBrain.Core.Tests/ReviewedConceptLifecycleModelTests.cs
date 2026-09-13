@@ -50,6 +50,18 @@ public sealed class ReviewedConceptLifecycleModelTests
     }
 
     [Theory]
+    [InlineData(typeof(ReviewedConceptRemapResult))]
+    [InlineData(typeof(ReviewedConceptRefreshResult))]
+    public void MutationResults_DoNotRetainSourceEvidence(Type resultType)
+    {
+        var propertyNames = resultType.GetProperties().Select(item => item.Name).ToArray();
+
+        Assert.DoesNotContain("SourceReference", propertyNames);
+        Assert.DoesNotContain("SourceFingerprint", propertyNames);
+        Assert.DoesNotContain("SourceBody", propertyNames);
+    }
+
+    [Theory]
     [InlineData(ReviewedConceptResolutionStatus.Valid, 0)]
     [InlineData(ReviewedConceptResolutionStatus.ValidWithDiagnostics, 3)]
     [InlineData(ReviewedConceptResolutionStatus.Invalid, 4)]

@@ -65,6 +65,27 @@ public sealed class ReviewedConceptDiagnosticFormatterTests
         Assert.InRange(rendered.Length, 1, ReviewedConceptDiagnosticFormatter.MaximumRenderedLength);
     }
 
+    [Theory]
+    [InlineData("RCL310", "Identity mapping\nwas rejected.")]
+    [InlineData("RCL301", "Evidence refresh\rwas rejected.")]
+    public void Format_LifecycleMutationDiagnosticsRemainSingleLineAndBounded(
+        string code,
+        string message)
+    {
+        var diagnostic = new ReviewedConceptDiagnostic(
+            code,
+            AnalysisDiagnosticSeverity.Error,
+            ReviewedConceptDiagnosticScope.Assignment,
+            message,
+            "concept\tidentity",
+            new string('e', 1_000));
+
+        var rendered = ReviewedConceptDiagnosticFormatter.Format(diagnostic);
+
+        Assert.DoesNotContain(rendered, character => char.IsControl(character));
+        Assert.InRange(rendered.Length, 1, ReviewedConceptDiagnosticFormatter.MaximumRenderedLength);
+    }
+
     private static ReviewedConceptDiagnostic Diagnostic(string conceptId) => new(
         "RC200",
         AnalysisDiagnosticSeverity.Warning,
