@@ -313,7 +313,8 @@ public sealed record InitiativeAnalysisResult(
     IReadOnlyList<GovernedRecommendation> Recommendations,
     PolicyOutcome PolicyOutcome,
     InitiativeAnalysisUsage Usage,
-    string? SavedAnalysisPath);
+    string? SavedAnalysisPath,
+    IReadOnlyList<OutboundPolicyAssessment> OutboundPolicyAssessments);
 
 public sealed record InitiativeAnalysisRequest(
     string InitiativeFileName,

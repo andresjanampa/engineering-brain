@@ -289,10 +289,15 @@ internal static class BrainCli
             };
             var interpretationEffort = providerOptions.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
             var analysisEffort = providerOptions.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
-            var preview = await new RemoteContextPreviewService().CreateAsync(
+            var secretValues = new EnvironmentOutboundSecretValueSource();
+            var outboundGuard = new OutboundContextGuard(secretValues);
+            var outboundEvaluator = new OutboundPolicyEvaluator();
+            var outboundGate = new OutboundRequestGate(outboundGuard, outboundEvaluator);
+            var preparation = await new RemoteContextPreviewService(gate: outboundGate).PrepareAsync(
                 options.InitiativePath, initiative, memory, reviewedConcepts,
                 options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, cancellation.Token);
+            var preview = preparation.Preview;
             WritePreview(preview);
             if (options.Preview)
             {
@@ -307,7 +312,7 @@ internal static class BrainCli
             IReasoningProvider provider = new OpenAIReasoningProvider(
                 apiKey,
                 providerOptions);
-            var service = new InitiativeAnalysisService(provider);
+            var service = new InitiativeAnalysisService(provider, outboundGate: outboundGate);
             var result = await service.AnalyzeAsync(
                 new InitiativeAnalysisRequest(
                     options.InitiativePath,
@@ -316,6 +321,7 @@ internal static class BrainCli
                     options.InterpretationModel,
                     options.ReasoningModel),
                 reviewedConcepts,
+                preparation.ApprovedCall1,
                 cancellation.Token);
             WriteAnalysis(result);
             return 0;

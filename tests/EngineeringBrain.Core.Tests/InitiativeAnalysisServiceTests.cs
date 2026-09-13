@@ -6,6 +6,139 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class InitiativeAnalysisServiceTests
 {
     [Fact]
+    public async Task AnalyzeAsync_ReusesThePreparedApprovedCallOneInstance()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var gate = new OutboundRequestGate();
+        var preparation = await new RemoteContextPreviewService(gate: gate).PrepareAsync(
+            "initiative.md",
+            "Add business execution.",
+            memory,
+            ReviewedConceptResolutionResult.Absent,
+            "interpretation-model",
+            "reasoning-model",
+            "low",
+            "medium");
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business", "execute"),
+            InitiativeAnalysisTestData.Analysis());
+
+        await Service(provider, fixture.Root, gate).AnalyzeAsync(
+            Request(memory, "Add business execution."),
+            ReviewedConceptResolutionResult.Absent,
+            preparation.ApprovedCall1);
+
+        Assert.Same(preparation.ApprovedCall1, provider.ApprovedRequests[0]);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_PreparedCallOneMismatchFailsBeforeProvider()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var gate = new OutboundRequestGate();
+        var preparation = await new RemoteContextPreviewService(gate: gate).PrepareAsync(
+            "initiative.md",
+            "Add business execution.",
+            memory,
+            ReviewedConceptResolutionResult.Absent,
+            "interpretation-model",
+            "reasoning-model",
+            "low",
+            "medium");
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business"),
+            InitiativeAnalysisTestData.Analysis());
+
+        await Assert.ThrowsAsync<OutboundSecurityException>(() =>
+            Service(provider, fixture.Root, gate).AnalyzeAsync(
+                Request(memory, "A different initiative."),
+                ReviewedConceptResolutionResult.Absent,
+                preparation.ApprovedCall1));
+
+        Assert.Empty(provider.ApprovedRequests);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_ActualCallTwoIsExactNotProjected()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business", "execute"),
+            InitiativeAnalysisTestData.Analysis());
+
+        var result = await Service(provider, fixture.Root).AnalyzeAsync(
+            Request(memory, "Add business execution."));
+
+        Assert.Equal(OutboundAssessmentKind.Exact, provider.ApprovedRequests[1].Assessment.AssessmentKind);
+        Assert.Equal(
+            provider.ApprovedRequests[1].Assessment.PayloadFingerprint,
+            result.OutboundPolicyAssessments[1].PayloadFingerprint);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_BlockedCallTwoMakesZeroSecondProviderCalls()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await AddRootNoteTextAsync(await fixture.CreateMemoryAsync(), "fixture-call-two-secret");
+        var gate = CreateGate("fixture-call-two-secret");
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business", "execute"),
+            InitiativeAnalysisTestData.Analysis());
+
+        await Assert.ThrowsAsync<OutboundSecurityException>(() =>
+            Service(provider, fixture.Root, gate).AnalyzeAsync(
+                Request(memory, "Add business execution.")));
+
+        Assert.Single(provider.ApprovedRequests);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_RecordsTwoExactAssessmentsInCallOrder()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business", "execute"),
+            InitiativeAnalysisTestData.Analysis());
+
+        var result = await Service(provider, fixture.Root).AnalyzeAsync(
+            Request(memory, "Add business execution."));
+
+        Assert.Collection(
+            result.OutboundPolicyAssessments,
+            assessment =>
+            {
+                Assert.Equal(OutboundAssessmentKind.Exact, assessment.AssessmentKind);
+                Assert.Equal(provider.ApprovedRequests[0].Assessment, assessment);
+            },
+            assessment =>
+            {
+                Assert.Equal(OutboundAssessmentKind.Exact, assessment.AssessmentKind);
+                Assert.Equal(provider.ApprovedRequests[1].Assessment, assessment);
+            });
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WithoutPreparationStillApprovesBothCalls()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business", "execute"),
+            InitiativeAnalysisTestData.Analysis());
+
+        await Service(provider, fixture.Root).AnalyzeAsync(
+            Request(memory, "Add business execution."));
+
+        Assert.Equal(2, provider.ApprovedRequests.Count);
+        Assert.All(provider.ApprovedRequests, request =>
+            Assert.Equal(OutboundAssessmentKind.Exact, request.Assessment.AssessmentKind));
+    }
+
+    [Fact]
     public async Task AnalyzeAndPreview_ReuseSameReviewedConceptResolution()
     {
         using var fixture = new InitiativeMemoryFixture();
@@ -237,9 +370,13 @@ public sealed class InitiativeAnalysisServiceTests
         Assert.Contains("schema 1 is unsupported", error.Message, StringComparison.Ordinal);
     }
 
-    private static InitiativeAnalysisService Service(FakeReasoningProvider provider, string root) => new(
+    private static InitiativeAnalysisService Service(
+        FakeReasoningProvider provider,
+        string root,
+        OutboundRequestGate? gate = null) => new(
         provider,
-        store: new LocalInitiativeAnalysisStore(root));
+        store: new LocalInitiativeAnalysisStore(root),
+        outboundGate: gate);
 
     private static InitiativeAnalysisRequest Request(ProjectMemorySyncResult memory, string initiative) => new(
         "initiative.md",
@@ -253,4 +390,31 @@ public sealed class InitiativeAnalysisServiceTests
         InitiativeUnderstanding understanding,
         InitiativeAnalysis analysis) => new((request, type) =>
         type == typeof(InitiativeUnderstanding) ? understanding : analysis);
+
+    private static OutboundRequestGate CreateGate(params string[] secrets) => new(
+        new OutboundContextGuard(new FixedSecretValueSource(secrets)),
+        new OutboundPolicyEvaluator());
+
+    private static async Task<ProjectMemorySyncResult> AddRootNoteTextAsync(
+        ProjectMemorySyncResult memory,
+        string text)
+    {
+        var rootNote = memory.Manifest.Notes.Single(note => note.Kind == KnowledgeNoteKind.RootIndex);
+        var path = Path.Combine(memory.Location, rootNote.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var content = await File.ReadAllTextAsync(path) + Environment.NewLine + text;
+        await File.WriteAllTextAsync(path, content);
+        var updated = rootNote with { ContentHash = KnowledgeIdentity.ContentHash(content) };
+        return memory with
+        {
+            Manifest = memory.Manifest with
+            {
+                Notes = memory.Manifest.Notes.Select(note => note.Identity == rootNote.Identity ? updated : note).ToArray()
+            }
+        };
+    }
+
+    private sealed class FixedSecretValueSource(params string[] values) : IOutboundSecretValueSource
+    {
+        public IReadOnlySet<string> GetValues() => values.ToHashSet(StringComparer.Ordinal);
+    }
 }
