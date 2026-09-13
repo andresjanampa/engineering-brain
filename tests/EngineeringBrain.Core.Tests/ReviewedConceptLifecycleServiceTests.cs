@@ -120,6 +120,234 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
+    public async Task PromoteAsync_EmptyBranchBlocksBeforeRead()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+
+        var result = await fixture.PromoteAsync(sourceBranch: " ");
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL100");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_SameBranchBlocksBeforeRead()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+
+        var result = await fixture.PromoteAsync(sourceBranch: "main");
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL100");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_DetachedHeadBlocksBeforeRead()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+
+        var result = await fixture.PromoteAsync(
+            analyzedGit: new GitInfo(true, null, "target-head", null, true));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL200");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_NonCurrentTargetBlocksBeforeRead()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+
+        var result = await fixture.PromoteAsync(
+            analyzedGit: new GitInfo(true, "feature/other", "target-head", null, true));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL200");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_DirtyTargetBlocksBeforeRead()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+
+        var result = await fixture.PromoteAsync(
+            analyzedGit: new GitInfo(true, "main", "target-head", null, false));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL200");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_AbsentSourceBlocksWithoutCreatingTarget()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        File.Delete(fixture.SourcePath);
+
+        var result = await fixture.PromoteAsync();
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL101");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_MalformedSourceBlocksWithoutChangingTarget()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await File.WriteAllTextAsync(fixture.SourcePath, "{not-json");
+
+        var result = await fixture.PromoteAsync();
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL102");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_InvalidExistingTargetBlocksWithoutOverwrite()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.WriteTargetBytesAsync("{invalid-target");
+        fixture.RememberTarget();
+
+        var result = await fixture.PromoteAsync();
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL400");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_OneMissingEntityBlocksEntirePromotion()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ReplaceFirstAssignmentAsync(
+            new ReviewedConceptAssignment("entity:missing", "legacy/Missing.cs:1", "source-missing"));
+
+        var result = await fixture.PromoteAsync();
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL300");
+        Assert.Contains(result.Diagnostics, item => item.EntityId == "entity:missing");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_OneUnverifiableAssignmentPreservesExistingTarget()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        const string incompleteId = "entity:incomplete";
+        await fixture.ReplaceFirstAssignmentAsync(
+            new ReviewedConceptAssignment(incompleteId, "legacy/Incomplete.cs:1", "source-incomplete"));
+        var incomplete = fixture.TargetEvidence with
+        {
+            Components = fixture.TargetEvidence.Components
+                .Append(new KeyValuePair<string, ComponentFingerprintEvidence>(
+                    incompleteId,
+                    new ComponentFingerprintEvidence(
+                        incompleteId, "src/Incomplete.cs", 1, 2, "")))
+                .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal)
+        };
+
+        var result = await fixture.PromoteAsync(targetEvidence: incomplete);
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL301");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_BranchChangesBeforeWriteBlocksMutation()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+
+        var result = await fixture.PromoteAsync(gitInfo: new StaticGitInfoProvider(
+            new GitInfo(true, "feature/changed", "target-head", null, true)));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL201");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_HeadChangesBeforeWriteBlocksMutation()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+
+        var result = await fixture.PromoteAsync(gitInfo: new StaticGitInfoProvider(
+            new GitInfo(true, "main", "changed-head", null, true)));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL201");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_WorktreeBecomesDirtyBeforeWriteBlocksMutation()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+
+        var result = await fixture.PromoteAsync(gitInfo: new StaticGitInfoProvider(
+            new GitInfo(true, "main", "target-head", null, false)));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL201");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_WriterFingerprintConflictReturnsBlockedAndPreservesWinner()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+        await using var held = new FileStream(
+            fixture.TargetPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var writer = new LocalReviewedConceptWriter(
+            lockTimeout: TimeSpan.FromSeconds(2),
+            lockRetryDelay: TimeSpan.FromMilliseconds(10));
+
+        var promotion = fixture.PromoteAsync(writer: writer);
+        await Task.Delay(100);
+        var winner = "{\"winner\":true}";
+        await File.WriteAllTextAsync(fixture.TargetPath, winner);
+        await held.DisposeAsync();
+        var result = await promotion;
+
+        Assert.Equal(winner, await File.ReadAllTextAsync(fixture.TargetPath));
+        AssertBlocked(result, "RCL401");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_LockTimeoutReturnsBoundedDiagnostic()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+        await using var held = new FileStream(
+            fixture.TargetPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var writer = new LocalReviewedConceptWriter(
+            lockTimeout: TimeSpan.FromMilliseconds(100),
+            lockRetryDelay: TimeSpan.FromMilliseconds(10));
+
+        var result = await fixture.PromoteAsync(writer: writer);
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL401");
+        Assert.All(result.Diagnostics, item => Assert.InRange(
+            ReviewedConceptDiagnosticFormatter.Format(item).Length,
+            1,
+            ReviewedConceptDiagnosticFormatter.MaximumRenderedLength));
+    }
+
+    [Fact]
     public async Task GetStatusAsync_AbsentReturnsZeroCountsAndAbsent()
     {
         using var fixture = new TemporaryDirectory(create: false);
@@ -259,6 +487,12 @@ public sealed class ReviewedConceptLifecycleServiceTests
 
     private static ReviewedConceptEvidenceContext Evidence() => ReviewedConceptTestData.Evidence();
 
+    private static void AssertBlocked(ReviewedConceptPromotionResult result, string code)
+    {
+        Assert.Equal(ReviewedConceptPromotionOutcome.Blocked, result.Outcome);
+        Assert.Contains(result.Diagnostics, item => item.Code == code);
+    }
+
     private static async Task WriteAsync(string branchRoot, string content)
     {
         var path = new LocalReviewedConceptStore().GetPath(branchRoot);
@@ -294,6 +528,8 @@ public sealed class ReviewedConceptLifecycleServiceTests
     {
         private readonly TemporaryDirectory _root = new();
         private readonly GitInfo _git = new(true, "main", "target-head", null, true);
+        private byte[]? _rememberedTarget;
+        private DateTime? _rememberedTimestamp;
 
         public PromotionFixture()
         {
@@ -306,20 +542,86 @@ public sealed class ReviewedConceptLifecycleServiceTests
 
         public string SourceRoot { get; }
         public string TargetRoot { get; }
+        public string SourcePath => new LocalReviewedConceptStore().GetPath(SourceRoot);
+        public string TargetPath => new LocalReviewedConceptStore().GetPath(TargetRoot);
         public ReviewedConceptCatalog SourceCatalog { get; }
         public ReviewedConceptEvidenceContext TargetEvidence { get; }
 
-        public Task<ReviewedConceptPromotionResult> PromoteAsync() =>
+        public Task<ReviewedConceptPromotionResult> PromoteAsync(
+            string sourceBranch = "feature/source",
+            string targetBranch = "main",
+            ReviewedConceptEvidenceContext? targetEvidence = null,
+            GitInfo? analyzedGit = null,
+            IGitInfoProvider? gitInfo = null,
+            LocalReviewedConceptWriter? writer = null) =>
             new ReviewedConceptLifecycleService(
-                gitInfo: new StaticGitInfoProvider(_git)).PromoteAsync(
+                writer: writer,
+                gitInfo: gitInfo ?? new StaticGitInfoProvider(_git)).PromoteAsync(
                 "demo",
                 _root.Path,
-                "feature/source",
-                "main",
+                sourceBranch,
+                targetBranch,
                 SourceRoot,
                 TargetRoot,
-                TargetEvidence,
-                _git);
+                targetEvidence ?? TargetEvidence,
+                analyzedGit ?? _git);
+
+        public async Task SeedTargetAsync()
+        {
+            var result = await PromoteAsync();
+            Assert.Equal(ReviewedConceptPromotionOutcome.Promoted, result.Outcome);
+            RememberTarget();
+        }
+
+        public void RememberTarget()
+        {
+            _rememberedTarget = File.ReadAllBytes(TargetPath);
+            _rememberedTimestamp = File.GetLastWriteTimeUtc(TargetPath);
+        }
+
+        public void AssertTargetPreserved()
+        {
+            Assert.NotNull(_rememberedTarget);
+            Assert.Equal(_rememberedTarget, File.ReadAllBytes(TargetPath));
+            Assert.Equal(_rememberedTimestamp, File.GetLastWriteTimeUtc(TargetPath));
+        }
+
+        public async Task WriteTargetBytesAsync(string content)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(TargetPath)!);
+            await File.WriteAllTextAsync(TargetPath, content);
+        }
+
+        public async Task ReplaceFirstAssignmentAsync(ReviewedConceptAssignment replacement)
+        {
+            var declaration = SourceCatalog.Declarations[0] with { Assignments = [replacement] };
+            declaration = declaration with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(declaration)
+            };
+            var changed = SourceCatalog with
+            {
+                Declarations = [declaration, .. SourceCatalog.Declarations.Skip(1)]
+            };
+            await WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(changed));
+        }
+
+        public async Task ChangeReviewedDefinitionAsync()
+        {
+            var declaration = SourceCatalog.Declarations[0] with
+            {
+                Definition = SourceCatalog.Declarations[0].Definition + " Updated."
+            };
+            declaration = declaration with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(declaration)
+            };
+            var changed = SourceCatalog with
+            {
+                Declarations = [declaration, .. SourceCatalog.Declarations.Skip(1)]
+            };
+            await WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(changed));
+        }
 
         public async Task<ReviewedConceptCatalog> LoadTargetAsync()
         {

@@ -51,48 +51,119 @@ public sealed class ReviewedConceptLifecycleService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceBranch);
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetBranch);
         ArgumentNullException.ThrowIfNull(targetEvidence);
         ArgumentNullException.ThrowIfNull(analyzedGit);
 
+        var targetCatalogPath = _reader.GetPath(targetBranchKnowledgeLocation);
+        if (string.IsNullOrWhiteSpace(sourceBranch)
+            || string.IsNullOrWhiteSpace(targetBranch)
+            || string.Equals(sourceBranch, targetBranch, StringComparison.Ordinal))
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                string.Empty, targetCatalogPath, null, null,
+                [Diagnostic("RCL100", ReviewedConceptDiagnosticScope.Catalog,
+                    "Source and target branches must be distinct non-empty branch names.")]);
+        }
+
+        var sourceBranchKey = KnowledgeIdentity.CreateBranchKey(sourceBranch);
+        if (!analyzedGit.IsRepository
+            || string.IsNullOrWhiteSpace(analyzedGit.Branch)
+            || !string.Equals(analyzedGit.Branch, targetBranch, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(analyzedGit.HeadCommit)
+            || analyzedGit.IsWorkingTreeClean != true
+            || !string.Equals(targetEvidence.Branch, targetBranch, StringComparison.Ordinal)
+            || !string.Equals(targetEvidence.BranchKey,
+                KnowledgeIdentity.CreateBranchKey(targetBranch), StringComparison.Ordinal))
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                _reader.GetPath(sourceBranchKnowledgeLocation), targetCatalogPath,
+                null, null,
+                [Diagnostic("RCL200", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target must be the current clean non-detached repository branch.")]);
+        }
+
         var sourceLoad = await _reader.LoadAsync(sourceBranchKnowledgeLocation, cancellationToken);
+        if (sourceLoad.Status == ReviewedConceptLoadStatus.Absent)
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, targetCatalogPath, null, null,
+                [Diagnostic("RCL101", ReviewedConceptDiagnosticScope.Catalog,
+                    "Source reviewed concept catalog is absent.")]);
+        }
+
         if (sourceLoad.Status != ReviewedConceptLoadStatus.Loaded || sourceLoad.Catalog is null)
         {
-            throw new InvalidDataException("Source reviewed concept catalog is unavailable or invalid.");
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, targetCatalogPath, sourceLoad.ContentHash, null,
+                sourceLoad.Diagnostics.Append(Diagnostic(
+                    "RCL102", ReviewedConceptDiagnosticScope.Catalog,
+                    "Source reviewed concept catalog is invalid.")));
         }
 
         var previousTarget = await _reader.LoadAsync(targetBranchKnowledgeLocation, cancellationToken);
         if (previousTarget.Status == ReviewedConceptLoadStatus.Invalid)
         {
-            throw new InvalidDataException("Existing target reviewed concept catalog is invalid.");
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                previousTarget.Diagnostics.Append(Diagnostic(
+                    "RCL400", ReviewedConceptDiagnosticScope.Catalog,
+                    "Existing target reviewed concept catalog is invalid.")),
+                sourceLoad.Catalog);
         }
 
         if (previousTarget.Status == ReviewedConceptLoadStatus.Loaded)
         {
             var existingValidation = _validator.Validate(previousTarget.Catalog!, targetEvidence);
             var existingResolution = _resolver.Resolve(previousTarget, existingValidation, targetEvidence);
-            if (existingResolution.Status is not ReviewedConceptResolutionStatus.Valid)
+            var canonicalTarget = ReviewedConceptSerializer.CreateCatalogFingerprint(previousTarget.Catalog!);
+            if (existingResolution.Status is not ReviewedConceptResolutionStatus.Valid
+                || !string.Equals(previousTarget.ContentHash, canonicalTarget, StringComparison.Ordinal))
             {
-                throw new InvalidDataException("Existing target reviewed concept catalog is not fully valid.");
+                return BlockedResult(
+                    repositoryName, targetEvidence, sourceBranch, targetBranch,
+                    sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                    existingResolution.Diagnostics.Append(Diagnostic(
+                        "RCL400", ReviewedConceptDiagnosticScope.Catalog,
+                        "Existing target reviewed concept catalog is not fully valid.")),
+                    sourceLoad.Catalog);
             }
         }
 
         var sourceIdentity = new ReviewedConceptCatalogIdentity(
             targetEvidence.RepositoryId,
             sourceBranch,
-            KnowledgeIdentity.CreateBranchKey(sourceBranch));
+            sourceBranchKey);
         var sourceValidation = _validator.ValidateIntegrity(sourceLoad.Catalog, sourceIdentity);
         var canonicalSourceFingerprint = ReviewedConceptSerializer.CreateCatalogFingerprint(sourceLoad.Catalog);
-        if (!sourceValidation.CatalogIsValid
-            || sourceValidation.Diagnostics.Count > 0
-            || !string.Equals(sourceLoad.ContentHash, canonicalSourceFingerprint, StringComparison.Ordinal))
+        if (!string.Equals(sourceLoad.ContentHash, canonicalSourceFingerprint, StringComparison.Ordinal))
         {
-            throw new InvalidDataException("Source reviewed concept catalog failed integrity validation.");
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                [Diagnostic("RCL103", ReviewedConceptDiagnosticScope.Catalog,
+                    "Source reviewed concept catalog serialization is not canonical.")],
+                sourceLoad.Catalog);
+        }
+
+        if (!sourceValidation.CatalogIsValid || sourceValidation.Diagnostics.Count > 0)
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                sourceValidation.Diagnostics.Append(Diagnostic(
+                    "RCL102", ReviewedConceptDiagnosticScope.Catalog,
+                    "Source reviewed concept catalog failed integrity validation.")),
+                sourceLoad.Catalog);
         }
 
         var reboundSourceReferences = 0;
         var rebuiltDeclarations = new List<ReviewedConceptDeclaration>();
+        var diagnostics = new List<ReviewedConceptDiagnostic>();
         foreach (var declaration in sourceLoad.Catalog.Declarations)
         {
             var assignments = new List<ReviewedConceptAssignment>();
@@ -100,14 +171,22 @@ public sealed class ReviewedConceptLifecycleService
             {
                 if (!targetEvidence.Components.TryGetValue(sourceAssignment.EntityId, out var target))
                 {
-                    throw new InvalidDataException("A reviewed assignment cannot be proven against target evidence.");
+                    diagnostics.Add(Diagnostic(
+                        "RCL300", ReviewedConceptDiagnosticScope.Assignment,
+                        "Reviewed assignment entity is absent from target evidence.",
+                        declaration.ConceptId, sourceAssignment.EntityId));
+                    continue;
                 }
 
                 if (string.IsNullOrWhiteSpace(target.RelativePath)
                     || target.StartLine <= 0
                     || string.IsNullOrWhiteSpace(target.SourceFingerprint))
                 {
-                    throw new InvalidDataException("Target component evidence is incomplete.");
+                    diagnostics.Add(Diagnostic(
+                        "RCL301", ReviewedConceptDiagnosticScope.Assignment,
+                        "Target component evidence is incomplete.",
+                        declaration.ConceptId, sourceAssignment.EntityId));
+                    continue;
                 }
 
                 var sourceReference = $"{target.RelativePath}:{target.StartLine}";
@@ -131,6 +210,15 @@ public sealed class ReviewedConceptLifecycleService
             {
                 Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(draft)
             });
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                diagnostics,
+                sourceLoad.Catalog);
         }
 
         var candidate = new ReviewedConceptCatalog(
@@ -157,24 +245,52 @@ public sealed class ReviewedConceptLifecycleService
             || candidateValidation.Declarations.Count != sourceLoad.Catalog.Declarations.Count
             || candidateAssignmentCount != sourceAssignmentCount)
         {
-            throw new InvalidDataException("Promoted reviewed concept catalog failed target validation.");
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                candidateResolution.Diagnostics.Append(Diagnostic(
+                    "RCL301", ReviewedConceptDiagnosticScope.Catalog,
+                    "Promoted reviewed concept catalog failed target validation.")),
+                sourceLoad.Catalog);
         }
 
-        var write = await _writer.WriteAsync(
-            targetBranchKnowledgeLocation,
-            candidate,
-            previousTarget.ContentHash,
-            async token =>
-            {
-                var currentGit = await _gitInfo.GetInfoAsync(repositoryRoot, token);
-                if (!string.Equals(currentGit.Branch, analyzedGit.Branch, StringComparison.Ordinal)
-                    || !string.Equals(currentGit.HeadCommit, analyzedGit.HeadCommit, StringComparison.Ordinal)
-                    || currentGit.IsWorkingTreeClean != true)
+        ReviewedConceptWriteResult write;
+        try
+        {
+            write = await _writer.WriteAsync(
+                targetBranchKnowledgeLocation,
+                candidate,
+                previousTarget.ContentHash,
+                async token =>
                 {
-                    throw new InvalidOperationException("Target repository state changed before promotion commit.");
-                }
-            },
-            cancellationToken);
+                    var currentGit = await _gitInfo.GetInfoAsync(repositoryRoot, token);
+                    if (!string.Equals(currentGit.Branch, analyzedGit.Branch, StringComparison.Ordinal)
+                        || !string.Equals(currentGit.HeadCommit, analyzedGit.HeadCommit, StringComparison.Ordinal)
+                        || currentGit.IsWorkingTreeClean != true)
+                    {
+                        throw new ReviewedConceptTargetChangedException();
+                    }
+                },
+                cancellationToken);
+        }
+        catch (ReviewedConceptWriteConflictException)
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                [Diagnostic("RCL401", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target reviewed concept catalog changed or is locked.")],
+                sourceLoad.Catalog);
+        }
+        catch (ReviewedConceptTargetChangedException)
+        {
+            return BlockedResult(
+                repositoryName, targetEvidence, sourceBranch, targetBranch,
+                sourceLoad.Path, previousTarget.Path, sourceLoad.ContentHash, previousTarget.ContentHash,
+                [Diagnostic("RCL201", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target repository state changed before promotion commit.")],
+                sourceLoad.Catalog);
+        }
 
         return new ReviewedConceptPromotionResult(
             write.Outcome == ReviewedConceptWriteOutcome.Unchanged
@@ -200,6 +316,57 @@ public sealed class ReviewedConceptLifecycleService
             0,
             []);
     }
+
+    private static ReviewedConceptPromotionResult BlockedResult(
+        string repositoryName,
+        ReviewedConceptEvidenceContext targetEvidence,
+        string? sourceBranch,
+        string? targetBranch,
+        string sourceCatalogPath,
+        string targetCatalogPath,
+        string? sourceCatalogFingerprint,
+        string? previousTargetCatalogFingerprint,
+        IEnumerable<ReviewedConceptDiagnostic> diagnostics,
+        ReviewedConceptCatalog? sourceCatalog = null)
+    {
+        var ordered = OrderDiagnostics(diagnostics);
+        return new ReviewedConceptPromotionResult(
+            ReviewedConceptPromotionOutcome.Blocked,
+            targetEvidence.RepositoryId,
+            repositoryName,
+            sourceBranch ?? string.Empty,
+            string.IsNullOrWhiteSpace(sourceBranch)
+                ? string.Empty
+                : KnowledgeIdentity.CreateBranchKey(sourceBranch),
+            targetBranch ?? string.Empty,
+            targetEvidence.BranchKey,
+            sourceCatalogPath,
+            targetCatalogPath,
+            sourceCatalogFingerprint,
+            previousTargetCatalogFingerprint,
+            null,
+            sourceCatalog?.Declarations.Count ?? 0,
+            sourceCatalog?.Declarations.Sum(item => item.Assignments.Count) ?? 0,
+            0,
+            0,
+            0,
+            0,
+            ordered.Count(item => item.Scope == ReviewedConceptDiagnosticScope.Assignment),
+            ordered);
+    }
+
+    private static ReviewedConceptDiagnostic Diagnostic(
+        string code,
+        ReviewedConceptDiagnosticScope scope,
+        string message,
+        string? conceptId = null,
+        string? entityId = null) => new(
+        code,
+        AnalysisDiagnosticSeverity.Error,
+        scope,
+        message,
+        conceptId,
+        entityId);
 
     private async Task<ReviewedConceptLifecycleStatusResult> InspectAsync(
         string repositoryName,
@@ -287,4 +454,12 @@ public sealed class ReviewedConceptLifecycleService
         .ThenBy(item => item.EntityId, StringComparer.Ordinal)
         .ThenBy(item => item.Code, StringComparer.Ordinal)
         .ToArray();
+}
+
+internal sealed class ReviewedConceptTargetChangedException : InvalidOperationException
+{
+    public ReviewedConceptTargetChangedException()
+        : base("Target repository state changed before promotion commit.")
+    {
+    }
 }
