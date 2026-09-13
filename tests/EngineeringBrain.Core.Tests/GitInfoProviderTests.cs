@@ -6,6 +6,19 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class GitInfoProviderTests
 {
     [Fact]
+    public async Task GetInfoAsync_DetachedHeadUsesProductionSentinel()
+    {
+        using var repository = new GitRepositoryFixture();
+        var head = repository.CommitFile("Value.cs", "public class Value { }", "initial");
+        repository.Run("checkout", "--detach", head);
+
+        var info = await new GitInfoProvider().GetInfoAsync(repository.Root);
+
+        Assert.True(info.IsRepository);
+        Assert.Equal("(detached HEAD)", info.Branch);
+    }
+
+    [Fact]
     public async Task GetRenamesAsync_ReportsCommittedRenameProvenByGit()
     {
         using var repository = new GitRepositoryFixture();

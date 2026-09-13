@@ -68,6 +68,7 @@ public sealed class ReviewedConceptLifecycleService
 
         var sourceBranchKey = KnowledgeIdentity.CreateBranchKey(sourceBranch);
         if (!analyzedGit.IsRepository
+            || analyzedGit.IsDetachedHead
             || string.IsNullOrWhiteSpace(analyzedGit.Branch)
             || !string.Equals(analyzedGit.Branch, targetBranch, StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(analyzedGit.HeadCommit)
@@ -264,7 +265,8 @@ public sealed class ReviewedConceptLifecycleService
                 async token =>
                 {
                     var currentGit = await _gitInfo.GetInfoAsync(repositoryRoot, token);
-                    if (!string.Equals(currentGit.Branch, analyzedGit.Branch, StringComparison.Ordinal)
+                    if (currentGit.IsDetachedHead
+                        || !string.Equals(currentGit.Branch, analyzedGit.Branch, StringComparison.Ordinal)
                         || !string.Equals(currentGit.HeadCommit, analyzedGit.HeadCommit, StringComparison.Ordinal)
                         || currentGit.IsWorkingTreeClean != true)
                     {

@@ -144,16 +144,29 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
-    public async Task PromoteAsync_DetachedHeadBlocksBeforeRead()
+    public async Task PromoteAsync_ProductionDetachedHeadRepresentationBlocksBeforeRead()
     {
         using var fixture = new PromotionFixture();
-        await fixture.SeedTargetAsync();
+        const string detachedHead = "(detached HEAD)";
+        var detachedEvidence = fixture.TargetEvidence with
+        {
+            Branch = detachedHead,
+            BranchKey = KnowledgeIdentity.CreateBranchKey(detachedHead)
+        };
 
         var result = await fixture.PromoteAsync(
-            analyzedGit: new GitInfo(true, null, "target-head", null, true));
+            targetBranch: detachedHead,
+            targetEvidence: detachedEvidence,
+            analyzedGit: new GitInfo(true, detachedHead, "target-head", null, true),
+            gitInfo: new StaticGitInfoProvider(
+                new GitInfo(true, detachedHead, "target-head", null, true)));
 
-        fixture.AssertTargetPreserved();
+        Assert.False(File.Exists(fixture.TargetPath));
         AssertBlocked(result, "RCL200");
+        Assert.All(result.Diagnostics, item => Assert.InRange(
+            ReviewedConceptDiagnosticFormatter.Format(item).Length,
+            1,
+            ReviewedConceptDiagnosticFormatter.MaximumRenderedLength));
     }
 
     [Fact]
@@ -300,6 +313,24 @@ public sealed class ReviewedConceptLifecycleServiceTests
 
         fixture.AssertTargetPreserved();
         AssertBlocked(result, "RCL201");
+    }
+
+    [Fact]
+    public async Task PromoteAsync_DetachedHeadBeforeWriteBlocksMutation()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SeedTargetAsync();
+        await fixture.ChangeReviewedDefinitionAsync();
+
+        var result = await fixture.PromoteAsync(gitInfo: new StaticGitInfoProvider(
+            new GitInfo(true, "(detached HEAD)", "target-head", null, true)));
+
+        fixture.AssertTargetPreserved();
+        AssertBlocked(result, "RCL201");
+        Assert.All(result.Diagnostics, item => Assert.InRange(
+            ReviewedConceptDiagnosticFormatter.Format(item).Length,
+            1,
+            ReviewedConceptDiagnosticFormatter.MaximumRenderedLength));
     }
 
     [Fact]
