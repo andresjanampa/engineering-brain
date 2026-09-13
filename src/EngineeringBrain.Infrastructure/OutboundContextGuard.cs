@@ -7,6 +7,7 @@ namespace EngineeringBrain.Infrastructure;
 public sealed partial class OutboundContextGuard
 {
     private const int MaximumFindingCount = 99;
+    private const int MaximumCFamilyBodyLookaheadLines = 64;
 
     private static readonly HashSet<ContextSegmentKind> AllowedCall2Kinds =
     [
@@ -174,8 +175,7 @@ public sealed partial class OutboundContextGuard
                 OutboundInspectionReasonCode.RawSnapshotPayload, OutboundTriggerKind.ContentPattern, 1);
         }
 
-        var sourceBodies = SourceDeclarationBody().Matches(content).Count
-            + MethodBody().Matches(content).Count
+        var sourceBodies = CountCFamilyBodies(content)
             + PythonBody().Matches(content).Count;
         Add(findings, PolicyContentScope.SourceBodies,
             OutboundInspectionReasonCode.SourceBodyPayload, OutboundTriggerKind.ContentPattern, sourceBodies);
@@ -298,6 +298,180 @@ public sealed partial class OutboundContextGuard
 
         return count;
     }
+
+    private static int CountCFamilyBodies(string content)
+    {
+        var lines = content.Split('\n');
+        var count = 0;
+
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        {
+            var line = lines[lineIndex].TrimEnd('\r');
+            var openingBrace = line.IndexOf('{');
+            var header = openingBrace >= 0 ? line[..openingBrace] : line;
+            if (!IsCFamilyDeclarationHeader(header))
+            {
+                continue;
+            }
+
+            var braceLineIndex = lineIndex;
+            string contentAfterBrace;
+            if (openingBrace >= 0)
+            {
+                contentAfterBrace = line[(openingBrace + 1)..];
+            }
+            else
+            {
+                braceLineIndex = NextNonEmptyLine(lines, lineIndex + 1);
+                if (braceLineIndex < 0)
+                {
+                    continue;
+                }
+
+                var braceLine = lines[braceLineIndex].TrimEnd('\r');
+                openingBrace = braceLine.IndexOf('{');
+                if (openingBrace < 0 || !string.IsNullOrWhiteSpace(braceLine[..openingBrace]))
+                {
+                    continue;
+                }
+
+                contentAfterBrace = braceLine[(openingBrace + 1)..];
+            }
+
+            if (HasCFamilyBodyContent(contentAfterBrace)
+                || HasCFamilyBodyLine(lines, braceLineIndex + 1))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static bool IsCFamilyDeclarationHeader(string header)
+    {
+        var text = header.Trim();
+        if (text.Length == 0 || text.EndsWith(';') || text.Contains("=>", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (IsCFamilyDeclarationHeader(tokens, text))
+        {
+            return true;
+        }
+
+        for (var index = 1; index < tokens.Length; index++)
+        {
+            if (IsCFamilyAccessModifier(tokens[index])
+                && IsCFamilyDeclarationHeader(tokens[index..], string.Join(' ', tokens[index..])))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCFamilyDeclarationHeader(string[] tokens, string text)
+    {
+        var firstSignificant = 0;
+        while (firstSignificant < tokens.Length && IsCFamilyModifier(tokens[firstSignificant]))
+        {
+            firstSignificant++;
+        }
+
+        if (firstSignificant >= tokens.Length)
+        {
+            return false;
+        }
+
+        if (IsCFamilyTypeKeyword(tokens[firstSignificant]))
+        {
+            var nameIndex = tokens[firstSignificant].Equals("record", StringComparison.Ordinal)
+                && firstSignificant + 1 < tokens.Length
+                && (tokens[firstSignificant + 1].Equals("class", StringComparison.Ordinal)
+                    || tokens[firstSignificant + 1].Equals("struct", StringComparison.Ordinal))
+                    ? firstSignificant + 2
+                    : firstSignificant + 1;
+            return nameIndex < tokens.Length && CFamilyIdentifier().IsMatch(tokens[nameIndex]);
+        }
+
+        var openParenthesis = text.IndexOf('(');
+        var closeParenthesis = text.LastIndexOf(')');
+        if (openParenthesis <= 0
+            || closeParenthesis < openParenthesis
+            || !string.IsNullOrWhiteSpace(text[(closeParenthesis + 1)..]))
+        {
+            return false;
+        }
+
+        var prefixTokens = text[..openParenthesis]
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var methodStart = 0;
+        while (methodStart < prefixTokens.Length && IsCFamilyModifier(prefixTokens[methodStart]))
+        {
+            methodStart++;
+        }
+
+        return methodStart < prefixTokens.Length
+            && !IsCFamilyControlKeyword(prefixTokens[methodStart])
+            && CFamilyMemberName().IsMatch(prefixTokens[^1]);
+    }
+
+    private static int NextNonEmptyLine(string[] lines, int startIndex)
+    {
+        for (var index = startIndex;
+             index < lines.Length && index - startIndex < MaximumCFamilyBodyLookaheadLines;
+             index++)
+        {
+            if (!string.IsNullOrWhiteSpace(lines[index]))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool HasCFamilyBodyLine(string[] lines, int startIndex)
+    {
+        for (var index = startIndex;
+             index < lines.Length && index - startIndex < MaximumCFamilyBodyLookaheadLines;
+             index++)
+        {
+            var line = lines[index].TrimEnd('\r');
+            if (HasCFamilyBodyContent(line))
+            {
+                return true;
+            }
+
+            if (line.Contains('}'))
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasCFamilyBodyContent(string value) => value.Any(character =>
+        !char.IsWhiteSpace(character) && character is not '{' and not '}' and not ';');
+
+    private static bool IsCFamilyModifier(string value) => value is
+        "public" or "private" or "protected" or "internal" or "static" or "abstract" or "sealed"
+        or "partial" or "readonly" or "ref" or "unsafe" or "new" or "file" or "async" or "virtual"
+        or "override" or "extern" or "final" or "synchronized" or "native" or "inline" or "constexpr";
+
+    private static bool IsCFamilyAccessModifier(string value) => value is
+        "public" or "private" or "protected" or "internal";
+
+    private static bool IsCFamilyTypeKeyword(string value) => value is "class" or "record" or "struct" or "enum";
+
+    private static bool IsCFamilyControlKeyword(string value) => value is
+        "if" or "for" or "foreach" or "while" or "switch" or "catch" or "using" or "lock"
+        or "return" or "throw" or "new";
 
     private static bool IsRepositoryRelativeReference(string reference)
     {
@@ -428,11 +602,11 @@ public sealed partial class OutboundContextGuard
     [GeneratedRegex(@"\bsk-[A-Za-z0-9_-]{12,}", RegexOptions.CultureInvariant)]
     private static partial Regex OpenAIKey();
 
-    [GeneratedRegex(@"\b(?:public|private|protected|internal)\s+(?:class|record|interface|enum)\s+\w+[^\r\n]*\{", RegexOptions.CultureInvariant)]
-    private static partial Regex SourceDeclarationBody();
+    [GeneratedRegex(@"^[A-Za-z_]\w*(?:<[^<>\r\n]+>)?$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex CFamilyIdentifier();
 
-    [GeneratedRegex(@"\b(?:public|private|protected|internal)\s+[^\r\n;]+\([^\r\n]*\)\s*\{", RegexOptions.CultureInvariant)]
-    private static partial Regex MethodBody();
+    [GeneratedRegex(@"^(?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*(?:<[^<>\r\n]+>)?$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex CFamilyMemberName();
 
     [GeneratedRegex(@"(?m)^\s*(?:class|def)\s+\w+[^\r\n]*:\s*\r?\n[ \t]+(?!#)\S", RegexOptions.CultureInvariant)]
     private static partial Regex PythonBody();

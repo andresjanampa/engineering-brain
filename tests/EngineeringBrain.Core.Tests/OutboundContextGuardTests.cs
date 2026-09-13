@@ -45,7 +45,7 @@ public sealed class OutboundContextGuardTests
     [Fact]
     public void InitiativeAbsolutePathAndSourceBodyAreRejected()
     {
-        var result = _guard.ValidateInitiative("Inspect C:\\Users\\name\\repo and public class Leaked {");
+        var result = _guard.ValidateInitiative("Inspect C:\\Users\\name\\repo and public class Leaked { int Value; }");
         Assert.Equal(1, result.AbsolutePathFindings);
         Assert.Equal(1, result.SourceBodyFindings);
     }
@@ -215,6 +215,44 @@ public sealed class OutboundContextGuardTests
         var context = Context(ContextSegmentKind.SourceBody, "public void Run()\n{\n    return;\n}");
 
         AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("class Customer\n{\n    int Value;\n}")]
+    [InlineData("public class Customer\n{\n    int Value;\n}")]
+    [InlineData("void Save()\n{\n    return;\n}")]
+    [InlineData("public void Save()\n{\n    return;\n}")]
+    [InlineData("private void Save()\n{\n    return;\n}")]
+    [InlineData("class Customer {\n    int Value;\n}")]
+    [InlineData("void Save() {\n    return;\n}")]
+    public void Inspect_CompleteCFamilyBodyIsBlocked(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("public class Customer {")]
+    [InlineData("class Customer")]
+    [InlineData("void Save();")]
+    [InlineData("void Save()")]
+    [InlineData("public interface ICustomer\n{\n    void Save();\n}")]
+    [InlineData("CustomerService")]
+    [InlineData("src/Customer.cs")]
+    public void Inspect_IncompleteCFamilyDeclarationOrSafeReferenceIsAllowed(string content)
+    {
+        Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Fact]
+    public void Inspect_DetectedCFamilyBodyIsNotRetained()
+    {
+        const string sourceBody = "class SensitiveImplementation\n{\n    string Value = \"do-not-retain\";\n}";
+
+        var findings = _guard.Inspect(Request(sourceBody));
+
+        AssertFinding(findings, PolicyContentScope.SourceBodies);
+        Assert.DoesNotContain(sourceBody, string.Join('\n', findings), StringComparison.Ordinal);
+        Assert.DoesNotContain("do-not-retain", string.Join('\n', findings), StringComparison.Ordinal);
     }
 
     [Fact]
