@@ -144,7 +144,13 @@ public sealed partial class LocalLiveEvaluationStore
     public static string? Redact(string? value)
     {
         if (value is null) return null;
-        return Authorization().Replace(OpenAIKey().Replace(SecretAssignment().Replace(value, "$1=[REDACTED]"), "[REDACTED]"), "Authorization: [REDACTED]");
+        var redacted = Authorization().Replace(
+            OpenAIKey().Replace(
+                SecretAssignment().Replace(value, "$1=[REDACTED]"),
+                "[REDACTED]"),
+            "Authorization: [REDACTED]");
+        var singleLine = string.Concat(redacted.Select(character => char.IsControl(character) ? ' ' : character));
+        return singleLine.Length <= 512 ? singleLine : singleLine[..509] + "...";
     }
 
     private static void AppendJson(StringBuilder builder, string title, object? value)

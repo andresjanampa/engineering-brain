@@ -741,7 +741,7 @@ public sealed class LiveEvaluationTests
 
         Assert.Equal(LiveEvaluationExecutionStatus.StructuredOutputFailure, result.Cases[0].Status);
         Assert.Equal(1, result.Aggregate.StructuredOutputFailures);
-        Assert.Equal("StructuredOutputFailure", result.Cases[0].ErrorCategory);
+        Assert.Equal("InvalidStructuredOutput", result.Cases[0].ErrorCategory);
     }
 
     [Fact]
@@ -784,7 +784,8 @@ public sealed class LiveEvaluationTests
         var stored = string.Join('\n', Directory.GetFiles(result.ResultDirectory, "*", SearchOption.AllDirectories)
             .Select(File.ReadAllText));
         Assert.DoesNotContain(secret, stored, StringComparison.Ordinal);
-        Assert.Contains("[REDACTED]", stored, StringComparison.Ordinal);
+        Assert.Contains("TransportFailure", stored, StringComparison.Ordinal);
+        Assert.Contains("The reasoning provider request failed.", stored, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1167,7 +1168,15 @@ public sealed class LiveEvaluationTests
     {
         public string Name => "Fake";
         public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ApprovedReasoningRequest request, CancellationToken cancellationToken = default) =>
-            throw new ReasoningProviderException(request.Request.Stage, structured, 10, retries, "safe failure", 30, 10, 5, 2);
+            throw new ReasoningProviderException(
+                structured ? ReasoningProviderFailureCode.InvalidStructuredOutput : ReasoningProviderFailureCode.TransportFailure,
+                request.Request.Stage,
+                10,
+                retries,
+                30,
+                10,
+                5,
+                2);
     }
 
     private sealed class RawThrowingProvider(string message) : IReasoningProvider

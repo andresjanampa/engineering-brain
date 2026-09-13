@@ -13,6 +13,7 @@ public sealed class LiveEvaluationService
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
     private readonly OutboundRequestGate _gate;
+    private readonly SafeReasoningProviderInvoker _providerInvoker;
     private readonly LiveEvaluationMetricCalculator _metrics;
     private readonly LocalLiveEvaluationStore _store;
     private readonly Func<DateTimeOffset> _clock;
@@ -25,6 +26,7 @@ public sealed class LiveEvaluationService
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
         OutboundRequestGate? gate = null,
+        SafeReasoningProviderInvoker? providerInvoker = null,
         LiveEvaluationMetricCalculator? metrics = null,
         LocalLiveEvaluationStore? store = null,
         Func<DateTimeOffset>? clock = null)
@@ -36,6 +38,7 @@ public sealed class LiveEvaluationService
         _validator = validator ?? new AnalysisEvidenceValidator();
         _policyValidator = policyValidator ?? new PolicyComplianceValidator();
         _gate = gate ?? new OutboundRequestGate();
+        _providerInvoker = providerInvoker ?? new SafeReasoningProviderInvoker();
         _metrics = metrics ?? new LiveEvaluationMetricCalculator();
         _store = store ?? new LocalLiveEvaluationStore();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
@@ -207,7 +210,7 @@ public sealed class LiveEvaluationService
                 call1Estimate);
             var approvedCall1 = Approve(call1Request);
             var provider = providerFactory(item, runNumber);
-            var call1 = await InvokeAsync<InitiativeUnderstanding>(
+            var call1 = await _providerInvoker.InvokeAsync<InitiativeUnderstanding>(
                 provider,
                 approvedCall1,
                 cancellationToken);
@@ -248,7 +251,7 @@ public sealed class LiveEvaluationService
                 _budget.ReasoningOutputTokens,
                 call2Estimate);
             var approvedCall2 = Approve(call2Request, context);
-            var call2 = await InvokeAsync<InitiativeAnalysis>(
+            var call2 = await _providerInvoker.InvokeAsync<InitiativeAnalysis>(
                 provider,
                 approvedCall2,
                 cancellationToken);
@@ -280,7 +283,7 @@ public sealed class LiveEvaluationService
                 exception.StructuredOutputFailure
                     ? LiveEvaluationExecutionStatus.StructuredOutputFailure
                     : LiveEvaluationExecutionStatus.ProviderFailure,
-                exception.StructuredOutputFailure ? "StructuredOutputFailure" : "ProviderFailure",
+                exception.FailureCode.ToString(),
                 exception.Message);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -361,32 +364,4 @@ public sealed class LiveEvaluationService
             .Sum(result => result.FindingCount);
     }
 
-    private static async Task<ReasoningResult<T>> InvokeAsync<T>(
-        IReasoningProvider provider,
-        ApprovedReasoningRequest request,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await provider.GenerateStructuredAsync<T>(request, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (ReasoningProviderException)
-        {
-            throw;
-        }
-        catch (System.Text.Json.JsonException exception)
-        {
-            throw new ReasoningProviderException(request.Request.Stage, true, 0, 0,
-                $"Structured output failed validation. {exception.Message}");
-        }
-        catch (Exception exception)
-        {
-            throw new ReasoningProviderException(request.Request.Stage, false, 0, 0,
-                $"Provider execution failed. {exception.Message}");
-        }
-    }
 }

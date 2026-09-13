@@ -13,6 +13,7 @@ public sealed class InitiativeAnalysisService
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
     private readonly OutboundRequestGate _outboundGate;
+    private readonly SafeReasoningProviderInvoker _providerInvoker;
 
     public InitiativeAnalysisService(
         IReasoningProvider provider,
@@ -23,7 +24,8 @@ public sealed class InitiativeAnalysisService
         LocalInitiativeAnalysisStore? store = null,
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
-        OutboundRequestGate? outboundGate = null)
+        OutboundRequestGate? outboundGate = null,
+        SafeReasoningProviderInvoker? providerInvoker = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _retriever = retriever ?? new InitiativeCandidateRetriever();
@@ -34,6 +36,7 @@ public sealed class InitiativeAnalysisService
         _policyValidator = policyValidator ?? new PolicyComplianceValidator();
         _store = store ?? new LocalInitiativeAnalysisStore();
         _outboundGate = outboundGate ?? new OutboundRequestGate();
+        _providerInvoker = providerInvoker ?? new SafeReasoningProviderInvoker();
     }
 
     public async Task<InitiativeAnalysisResult> AnalyzeAsync(
@@ -93,7 +96,8 @@ public sealed class InitiativeAnalysisService
             }
         }
 
-        var understandingCall = await _provider.GenerateStructuredAsync<InitiativeUnderstanding>(
+        var understandingCall = await _providerInvoker.InvokeAsync<InitiativeUnderstanding>(
+            _provider,
             approvedCall1,
             cancellationToken);
         var retrieval = _retriever.Retrieve(
@@ -121,7 +125,8 @@ public sealed class InitiativeAnalysisService
                 _budget.ReasoningOutputTokens,
                 reasoningInputTokens);
         var approvedCall2 = _outboundGate.ApproveExact(analysisRequest, context);
-        var analysisCall = await _provider.GenerateStructuredAsync<InitiativeAnalysis>(
+        var analysisCall = await _providerInvoker.InvokeAsync<InitiativeAnalysis>(
+            _provider,
             approvedCall2,
             cancellationToken);
         var validated = _validator.Validate(analysisCall.Value, request.Memory.SourceSnapshot);

@@ -105,6 +105,30 @@ public sealed class InitiativeAnalysisSecurityTests
     }
 
     [Fact]
+    public async Task FailedInitiativeAnalysis_DoesNotPersistAnAnalysisArtifact()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var store = new LocalInitiativeAnalysisStore(fixture.Root);
+        var service = new InitiativeAnalysisService(new UnsafeThrowingProvider(), store: store);
+
+        var exception = await Assert.ThrowsAsync<ReasoningProviderException>(() => service.AnalyzeAsync(
+            new InitiativeAnalysisRequest(
+                "initiative.md",
+                "Add business capability.",
+                memory,
+                "model-a",
+                "model-b",
+                PersistResult: true)));
+
+        Assert.Equal(ReasoningProviderFailureCode.TransportFailure, exception.FailureCode);
+        Assert.DoesNotContain("fixture-provider-secret", exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            Directory.GetFiles(fixture.Root, "*.json", SearchOption.AllDirectories),
+            path => path.Contains($"{Path.DirectorySeparatorChar}analyses{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void StructuredSchemasAreStrictAndContainNoProviderCredentialField()
     {
         var json = ReasoningJsonSchema.For<InitiativeAnalysis>().ToString();
@@ -128,4 +152,14 @@ public sealed class InitiativeAnalysisSecurityTests
             ? InitiativeAnalysisTestData.Understanding("business")
             : InitiativeAnalysisTestData.Analysis(
                 InitiativeAnalysisTestData.Recommendation(RecommendationDecision.Create, [])));
+
+    private sealed class UnsafeThrowingProvider : IReasoningProvider
+    {
+        public string Name => "Unsafe";
+
+        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
+            ApprovedReasoningRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("fixture-provider-secret");
+    }
 }

@@ -87,8 +87,7 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
         var payload = MapTransportPayload<T>(request);
         var raw = request.Request;
         var stopwatch = Stopwatch.StartNew();
-        var failure = "The provider did not return a result.";
-        var structuredOutputFailure = false;
+        var failureCode = ReasoningProviderFailureCode.NoValidResult;
         var hasReportedUsage = false;
         var actualInputTokens = 0;
         var cachedInputTokens = 0;
@@ -154,8 +153,7 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                failure = "The reasoning provider timed out.";
-                structuredOutputFailure = false;
+                failureCode = ReasoningProviderFailureCode.Timeout;
             }
             catch (OperationCanceledException)
             {
@@ -163,22 +161,19 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
             }
             catch (JsonException)
             {
-                failure = "The provider returned an invalid structured response.";
-                structuredOutputFailure = true;
+                failureCode = ReasoningProviderFailureCode.InvalidStructuredOutput;
             }
             catch (Exception)
             {
-                failure = "The provider request failed.";
-                structuredOutputFailure = false;
+                failureCode = ReasoningProviderFailureCode.TransportFailure;
             }
         }
 
         throw new ReasoningProviderException(
+            failureCode,
             raw.Stage,
-            structuredOutputFailure,
             stopwatch.ElapsedMilliseconds,
             _options.MaximumRetries,
-            $"OpenAI returned no valid structured result during {raw.Stage} after {_options.MaximumRetries + 1} attempts. {failure} No request content or credential was logged.",
             hasReportedUsage ? actualInputTokens : null,
             hasReportedUsage ? cachedInputTokens : null,
             hasReportedUsage ? actualOutputTokens : null,
