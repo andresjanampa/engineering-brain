@@ -35,3 +35,5 @@ Incremental scans compare schema-compatible snapshots, resolve changed files to 
 Snapshot schema 3 adds safe file timestamps, file changes, project reuse decisions, performance metrics, and graph-integrity results to the existing evidence contract.
 
 Project Memory has an independent knowledge schema. Its manifest controls incremental reuse and stale managed-note deletion; unmanaged files are outside its ownership. Notes use deterministic LF output, collision-safe filenames, bounded collections, relative source evidence, and resolvable wiki links.
+
+Reviewed semantic concepts remain a separate human-reviewed layer. Runtime loading is read-only; cross-branch lifecycle operations are defined by [ADR 0010](../decisions/0010-reviewed-concept-lifecycle.md) and do not change Project Memory ownership or retrieval semantics.
