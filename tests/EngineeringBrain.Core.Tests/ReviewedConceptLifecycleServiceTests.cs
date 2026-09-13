@@ -361,6 +361,65 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
+    public async Task PromoteAsync_SchemaOneRemainsSchemaOneWithoutHistory()
+    {
+        using var fixture = new PromotionFixture();
+        await fixture.SetSourceCatalogAsync(fixture.SourceCatalog with
+        {
+            SchemaVersion = 1,
+            IdentityMigrations = []
+        });
+
+        await fixture.PromoteAsync();
+        var target = await fixture.LoadTargetAsync();
+
+        Assert.Equal(1, target.SchemaVersion);
+        Assert.Empty(target.IdentityMigrations);
+    }
+
+    [Fact]
+    public async Task PromoteAsync_SchemaTwoPreservesMigrationHistoryExactly()
+    {
+        using var fixture = new PromotionFixture();
+        var source = fixture.SourceCatalog with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [fixture.CreateHistoricalMigration()]
+        };
+        await fixture.SetSourceCatalogAsync(source);
+
+        await fixture.PromoteAsync();
+        var target = await fixture.LoadTargetAsync();
+
+        Assert.Equal(2, target.SchemaVersion);
+        var expected = Assert.Single(source.IdentityMigrations);
+        var actual = Assert.Single(target.IdentityMigrations);
+        Assert.Equal(expected with { AffectedConceptIds = [] },
+            actual with { AffectedConceptIds = [] });
+        Assert.Equal(expected.AffectedConceptIds, actual.AffectedConceptIds);
+    }
+
+    [Fact]
+    public async Task PromoteAsync_DoesNotRewriteHistoricalMigrationBranchIdentity()
+    {
+        using var fixture = new PromotionFixture();
+        var migration = fixture.CreateHistoricalMigration();
+        await fixture.SetSourceCatalogAsync(fixture.SourceCatalog with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [migration]
+        });
+
+        await fixture.PromoteAsync();
+        var promotedMigration = Assert.Single((await fixture.LoadTargetAsync()).IdentityMigrations);
+
+        Assert.Equal(migration.RepositoryId, promotedMigration.RepositoryId);
+        Assert.Equal(migration.Branch, promotedMigration.Branch);
+        Assert.Equal(migration.BranchKey, promotedMigration.BranchKey);
+        Assert.NotEqual(fixture.TargetEvidence.Branch, promotedMigration.Branch);
+    }
+
+    [Fact]
     public async Task PromoteAsync_ReconstructsEntireEnvelopeFromTargetEvidence()
     {
         using var fixture = new PromotionFixture();
@@ -1108,6 +1167,32 @@ public sealed class ReviewedConceptLifecycleServiceTests
                 Declarations = [declaration, .. SourceCatalog.Declarations.Skip(1)]
             };
             await WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(changed));
+        }
+
+        public Task SetSourceCatalogAsync(ReviewedConceptCatalog catalog) =>
+            WriteAsync(SourceRoot, ReviewedConceptSerializer.Serialize(catalog));
+
+        public ReviewedConceptIdentityMigration CreateHistoricalMigration()
+        {
+            var draft = new ReviewedConceptIdentityMigration(
+                TargetEvidence.RepositoryId,
+                "feature/historical",
+                KnowledgeIdentity.CreateBranchKey("feature/historical"),
+                "entity:old-component",
+                "entity:component-00",
+                [SourceCatalog.Declarations[0].ConceptId],
+                "historical-catalog-fingerprint",
+                "src/Components/Component00.cs:10",
+                "historical-destination-fingerprint",
+                new ReviewedConceptReview(
+                    "historical-reviewer",
+                    1,
+                    new DateTimeOffset(2026, 9, 12, 8, 0, 0, TimeSpan.Zero)),
+                string.Empty);
+            return draft with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(draft)
+            };
         }
 
         public async Task RetargetSourceCatalogAsync(string sourceBranch)

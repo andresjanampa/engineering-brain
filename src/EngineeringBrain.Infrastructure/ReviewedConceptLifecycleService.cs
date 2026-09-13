@@ -559,14 +559,17 @@ public sealed class ReviewedConceptLifecycleService
         }
 
         var candidate = new ReviewedConceptCatalog(
-            ReviewedConceptSerializer.CurrentSchemaVersion,
+            sourceLoad.Catalog.SchemaVersion,
             targetEvidence.RepositoryId,
             targetBranch,
             targetEvidence.BranchKey,
             targetEvidence.SourceSnapshotSchema,
             targetEvidence.SourceAnalyzerVersion,
             sourceLoad.Catalog.VocabularyVersion,
-            rebuiltDeclarations);
+            rebuiltDeclarations)
+        {
+            IdentityMigrations = sourceLoad.Catalog.IdentityMigrations
+        };
         var candidateFingerprint = ReviewedConceptSerializer.CreateCatalogFingerprint(candidate);
         var candidateLoad = new ReviewedConceptLoadResult(
             ReviewedConceptLoadStatus.Loaded,
