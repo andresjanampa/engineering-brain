@@ -9,19 +9,22 @@ public sealed class ReviewedConceptLifecycleService
     private readonly ReviewedConceptValidator _validator;
     private readonly ReviewedConceptResolver _resolver;
     private readonly IGitInfoProvider _gitInfo;
+    private readonly TimeProvider _timeProvider;
 
     public ReviewedConceptLifecycleService(
         LocalReviewedConceptStore? reader = null,
         LocalReviewedConceptWriter? writer = null,
         ReviewedConceptValidator? validator = null,
         ReviewedConceptResolver? resolver = null,
-        IGitInfoProvider? gitInfo = null)
+        IGitInfoProvider? gitInfo = null,
+        TimeProvider? timeProvider = null)
     {
         _reader = reader ?? new LocalReviewedConceptStore();
         _writer = writer ?? new LocalReviewedConceptWriter(_reader);
         _validator = validator ?? new ReviewedConceptValidator();
         _resolver = resolver ?? new ReviewedConceptResolver();
         _gitInfo = gitInfo ?? new GitInfoProvider();
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public Task<ReviewedConceptLifecycleStatusResult> GetStatusAsync(
@@ -169,6 +172,206 @@ public sealed class ReviewedConceptLifecycleService
             rebuild.ReboundSourceReferenceCount,
             0,
             []);
+    }
+
+    public async Task<ReviewedConceptRemapResult> RemapAsync(
+        string repositoryName,
+        string repositoryRoot,
+        string branchKnowledgeLocation,
+        ReviewedConceptEvidenceContext evidence,
+        GitInfo analyzedGit,
+        string reviewer,
+        IReadOnlyList<ReviewedConceptIdentityMapping> mappings,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(evidence);
+        ArgumentNullException.ThrowIfNull(analyzedGit);
+        ArgumentNullException.ThrowIfNull(mappings);
+
+        var catalogPath = _reader.GetPath(branchKnowledgeLocation);
+        if (!IsStableTarget(analyzedGit, evidence))
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, null, mappings.Count,
+                [Diagnostic("RCL200", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target must be the current clean non-detached repository branch.")]);
+        }
+
+        var load = await _reader.LoadAsync(branchKnowledgeLocation, cancellationToken);
+        if (load.Status != ReviewedConceptLoadStatus.Loaded || load.Catalog is null)
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                load.Diagnostics.Append(Diagnostic(
+                    load.Status == ReviewedConceptLoadStatus.Absent ? "RCL101" : "RCL102",
+                    ReviewedConceptDiagnosticScope.Catalog,
+                    "Current reviewed concept catalog is absent or invalid.")));
+        }
+
+        var identity = new ReviewedConceptCatalogIdentity(
+            evidence.RepositoryId, evidence.Branch, evidence.BranchKey);
+        var integrity = _validator.ValidateIntegrity(load.Catalog, identity);
+        var canonical = ReviewedConceptSerializer.CreateCatalogFingerprint(load.Catalog);
+        if (!integrity.CatalogIsValid
+            || integrity.Diagnostics.Count > 0
+            || !string.Equals(load.ContentHash, canonical, StringComparison.Ordinal))
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                integrity.Diagnostics.Append(Diagnostic("RCL103", ReviewedConceptDiagnosticScope.Catalog,
+                    "Current reviewed concept catalog failed integrity validation.")), load.Catalog);
+        }
+
+        var mappingValidation = ValidateMappings(load.Catalog, evidence, reviewer, mappings);
+        if (mappingValidation.Diagnostics.Count > 0)
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                mappingValidation.Diagnostics, load.Catalog);
+        }
+
+        var mappingByOldId = mappings.ToDictionary(
+            item => item.OldEntityId, item => item.NewEntityId, StringComparer.Ordinal);
+        var rebuiltDeclarations = new List<ReviewedConceptDeclaration>();
+        var remappedAssignmentCount = 0;
+        foreach (var declaration in load.Catalog.Declarations)
+        {
+            var assignments = declaration.Assignments.Select(assignment =>
+            {
+                if (!mappingByOldId.TryGetValue(assignment.EntityId, out var newEntityId))
+                {
+                    return assignment;
+                }
+
+                var destination = evidence.Components[newEntityId];
+                remappedAssignmentCount++;
+                return new ReviewedConceptAssignment(
+                    newEntityId,
+                    $"{destination.RelativePath}:{destination.StartLine}",
+                    destination.SourceFingerprint);
+            }).ToArray();
+            var draft = declaration with { Assignments = assignments, Fingerprint = string.Empty };
+            rebuiltDeclarations.Add(draft with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateDeclarationFingerprint(draft)
+            });
+        }
+
+        var expectedIdentities = load.Catalog.Declarations
+            .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+                $"{declaration.ConceptId}\0{mappingByOldId.GetValueOrDefault(assignment.EntityId, assignment.EntityId)}"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var actualIdentities = rebuiltDeclarations
+            .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+                $"{declaration.ConceptId}\0{assignment.EntityId}"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (!expectedIdentities.SequenceEqual(actualIdentities, StringComparer.Ordinal)
+            || expectedIdentities.Length != load.Catalog.Declarations.Sum(item => item.Assignments.Count)
+            || rebuiltDeclarations.Any(declaration => declaration.Assignments
+                .Select(item => item.EntityId).Distinct(StringComparer.Ordinal).Count()
+                != declaration.Assignments.Count))
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                [Diagnostic("RCL312", ReviewedConceptDiagnosticScope.Catalog,
+                    "Remapped assignment identities are incomplete or conflicting.")], load.Catalog);
+        }
+
+        var migrations = load.Catalog.IdentityMigrations.ToList();
+        foreach (var mapping in mappings.OrderBy(item => item.OldEntityId, StringComparer.Ordinal))
+        {
+            var destination = evidence.Components[mapping.NewEntityId];
+            var migration = new ReviewedConceptIdentityMigration(
+                evidence.RepositoryId,
+                evidence.Branch,
+                evidence.BranchKey,
+                mapping.OldEntityId,
+                mapping.NewEntityId,
+                load.Catalog.Declarations
+                    .Where(item => item.Assignments.Any(assignment =>
+                        string.Equals(assignment.EntityId, mapping.OldEntityId, StringComparison.Ordinal)))
+                    .Select(item => item.ConceptId)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray(),
+                load.ContentHash!,
+                $"{destination.RelativePath}:{destination.StartLine}",
+                destination.SourceFingerprint,
+                new ReviewedConceptReview(reviewer.Trim(), 1, _timeProvider.GetUtcNow().ToUniversalTime()),
+                string.Empty);
+            migrations.Add(migration with
+            {
+                Fingerprint = ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(migration)
+            });
+        }
+
+        var candidate = load.Catalog with
+        {
+            SchemaVersion = ReviewedConceptSerializer.CurrentSchemaVersion,
+            Declarations = rebuiltDeclarations,
+            IdentityMigrations = migrations
+        };
+        var candidateFingerprint = ReviewedConceptSerializer.CreateCatalogFingerprint(candidate);
+        var candidateLoad = new ReviewedConceptLoadResult(
+            ReviewedConceptLoadStatus.Loaded, catalogPath, candidateFingerprint, candidate, []);
+        var candidateValidation = _validator.Validate(candidate, evidence);
+        var candidateResolution = _resolver.Resolve(candidateLoad, candidateValidation, evidence);
+        var permittedDiagnostics = candidateResolution.Diagnostics.All(item =>
+            item.Scope == ReviewedConceptDiagnosticScope.Assignment
+            && item.Code is "RC401" or "RC402");
+        if (candidateResolution.Status is not (
+                ReviewedConceptResolutionStatus.Valid or ReviewedConceptResolutionStatus.ValidWithDiagnostics)
+            || !permittedDiagnostics
+            || candidate.Declarations.Count != load.Catalog.Declarations.Count
+            || candidate.Declarations.Sum(item => item.Assignments.Count)
+                != load.Catalog.Declarations.Sum(item => item.Assignments.Count))
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                candidateResolution.Diagnostics.Append(Diagnostic(
+                    "RCL313", ReviewedConceptDiagnosticScope.Catalog,
+                    "Remapped reviewed concept catalog failed current evidence validation.")),
+                load.Catalog);
+        }
+
+        ReviewedConceptWriteResult write;
+        try
+        {
+            write = await _writer.WriteAsync(
+                branchKnowledgeLocation,
+                candidate,
+                load.ContentHash,
+                token => ValidateTargetBeforeCommitAsync(repositoryRoot, analyzedGit, token),
+                cancellationToken);
+        }
+        catch (ReviewedConceptWriteConflictException)
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                [Diagnostic("RCL401", ReviewedConceptDiagnosticScope.Catalog,
+                    "Reviewed concept catalog changed or is locked.")], load.Catalog);
+        }
+        catch (ReviewedConceptTargetChangedException)
+        {
+            return BlockedRemap(repositoryName, evidence, catalogPath, load.ContentHash, mappings.Count,
+                [Diagnostic("RCL201", ReviewedConceptDiagnosticScope.Catalog,
+                    "Target repository state changed before remap commit.")], load.Catalog);
+        }
+
+        return new ReviewedConceptRemapResult(
+            ReviewedConceptRemapOutcome.Remapped,
+            evidence.RepositoryId,
+            repositoryName,
+            evidence.Branch,
+            evidence.BranchKey,
+            write.Path,
+            load.ContentHash,
+            write.Fingerprint,
+            mappings.Count,
+            remappedAssignmentCount,
+            candidate.Declarations.Count,
+            candidate.Declarations.Sum(item => item.Assignments.Count),
+            candidateResolution.Profiles.Count,
+            migrations.Count,
+            candidateResolution.Diagnostics.Count,
+            candidateResolution.Diagnostics);
     }
 
     public async Task<ReviewedConceptPromotionResult> PromoteAsync(
@@ -518,6 +721,94 @@ public sealed class ReviewedConceptLifecycleService
             ordered);
     }
 
+    private static ReviewedConceptRemapResult BlockedRemap(
+        string repositoryName,
+        ReviewedConceptEvidenceContext evidence,
+        string catalogPath,
+        string? previousFingerprint,
+        int mappingCount,
+        IEnumerable<ReviewedConceptDiagnostic> diagnostics,
+        ReviewedConceptCatalog? catalog = null)
+    {
+        var ordered = OrderDiagnostics(diagnostics);
+        return new ReviewedConceptRemapResult(
+            ReviewedConceptRemapOutcome.Blocked,
+            evidence.RepositoryId,
+            repositoryName,
+            evidence.Branch,
+            evidence.BranchKey,
+            catalogPath,
+            previousFingerprint,
+            null,
+            mappingCount,
+            0,
+            catalog?.Declarations.Count ?? 0,
+            catalog?.Declarations.Sum(item => item.Assignments.Count) ?? 0,
+            0,
+            catalog?.IdentityMigrations.Count ?? 0,
+            ordered.Count(item => item.Scope == ReviewedConceptDiagnosticScope.Assignment),
+            ordered);
+    }
+
+    private static ReviewedConceptMappingValidation ValidateMappings(
+        ReviewedConceptCatalog catalog,
+        ReviewedConceptEvidenceContext evidence,
+        string reviewer,
+        IReadOnlyList<ReviewedConceptIdentityMapping> mappings)
+    {
+        var diagnostics = new List<ReviewedConceptDiagnostic>();
+        if (string.IsNullOrWhiteSpace(reviewer) || mappings.Count == 0)
+        {
+            diagnostics.Add(Diagnostic("RCL309", ReviewedConceptDiagnosticScope.Catalog,
+                "Reviewer and at least one explicit identity mapping are required."));
+            return new ReviewedConceptMappingValidation(diagnostics);
+        }
+
+        var missingIds = catalog.Declarations
+            .SelectMany(item => item.Assignments)
+            .Select(item => item.EntityId)
+            .Where(item => !evidence.Components.ContainsKey(item))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var oldIds = mappings
+            .Select(item => item.OldEntityId)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (mappings.Any(item => string.IsNullOrWhiteSpace(item.OldEntityId)
+                || string.IsNullOrWhiteSpace(item.NewEntityId)
+                || string.Equals(item.OldEntityId, item.NewEntityId, StringComparison.Ordinal))
+            || oldIds.Distinct(StringComparer.Ordinal).Count() != mappings.Count
+            || !missingIds.SequenceEqual(oldIds, StringComparer.Ordinal))
+        {
+            diagnostics.Add(Diagnostic("RCL310", ReviewedConceptDiagnosticScope.Catalog,
+                "Mappings must cover the exact distinct missing entity identity set once."));
+            return new ReviewedConceptMappingValidation(diagnostics);
+        }
+
+        var oldIdSet = oldIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var mapping in mappings.OrderBy(item => item.OldEntityId, StringComparer.Ordinal))
+        {
+            if (oldIdSet.Contains(mapping.NewEntityId))
+            {
+                diagnostics.Add(Diagnostic("RCL310", ReviewedConceptDiagnosticScope.Catalog,
+                    "Mapping chains and cycles are not supported."));
+                continue;
+            }
+
+            if (!evidence.Components.TryGetValue(mapping.NewEntityId, out var destination)
+                || string.IsNullOrWhiteSpace(destination.RelativePath)
+                || destination.StartLine <= 0
+                || string.IsNullOrWhiteSpace(destination.SourceFingerprint))
+            {
+                diagnostics.Add(Diagnostic("RCL311", ReviewedConceptDiagnosticScope.Assignment,
+                    "Mapped destination evidence is absent or incomplete.", entityId: mapping.NewEntityId));
+            }
+        }
+
+        return new ReviewedConceptMappingValidation(diagnostics);
+    }
+
     private static ReviewedConceptAssignmentRebuild RebindAllAssignments(
         ReviewedConceptCatalog catalog,
         ReviewedConceptEvidenceContext evidence)
@@ -715,6 +1006,9 @@ internal sealed record ReviewedConceptAssignmentRebuild(
     IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics,
     int RecomputedAssignmentCount,
     int ReboundSourceReferenceCount);
+
+internal sealed record ReviewedConceptMappingValidation(
+    IReadOnlyList<ReviewedConceptDiagnostic> Diagnostics);
 
 internal sealed class ReviewedConceptTargetChangedException : InvalidOperationException
 {

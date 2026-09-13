@@ -137,6 +137,216 @@ public sealed class ReviewedConceptLifecycleServiceTests
     }
 
     [Fact]
+    public async Task RemapAsync_ReplacesAllUsesAndRecordsDurableHumanReview()
+    {
+        using var fixture = new RefreshFixture();
+        var original = await fixture.SeedMissingEntityAsync(useInBothDeclarations: true);
+        var previousFingerprint = KnowledgeIdentity.ContentHash(
+            ReviewedConceptSerializer.Serialize(original));
+
+        var result = await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")]);
+        var remapped = await fixture.LoadAsync();
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Remapped, result.Outcome);
+        Assert.Equal(2, result.RemappedAssignmentCount);
+        Assert.DoesNotContain(remapped.Declarations.SelectMany(item => item.Assignments),
+            item => item.EntityId == "entity:missing");
+        var migration = Assert.Single(remapped.IdentityMigrations);
+        Assert.Equal(fixture.Evidence.RepositoryId, migration.RepositoryId);
+        Assert.Equal(fixture.Evidence.Branch, migration.Branch);
+        Assert.Equal(fixture.Evidence.BranchKey, migration.BranchKey);
+        Assert.Equal("entity:missing", migration.OldEntityId);
+        Assert.Equal("entity:business-service", migration.NewEntityId);
+        Assert.Equal(original.Declarations.Select(item => item.ConceptId).Order(StringComparer.Ordinal),
+            migration.AffectedConceptIds);
+        Assert.Equal(previousFingerprint, migration.PreviousCatalogFingerprint);
+        var destination = fixture.Evidence.Components[migration.NewEntityId];
+        Assert.Equal($"{destination.RelativePath}:{destination.StartLine}",
+            migration.DestinationSourceReference);
+        Assert.Equal(destination.SourceFingerprint, migration.DestinationSourceFingerprint);
+        Assert.Equal("alice", migration.Review.Reviewer);
+        Assert.Equal(fixture.Now, migration.Review.ReviewedAtUtc);
+        Assert.Equal(ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(migration),
+            migration.Fingerprint);
+    }
+
+    [Fact]
+    public async Task RemapAsync_UpgradesSchemaOneToSchemaTwoAtomically()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync();
+
+        var result = await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")]);
+        var remapped = await fixture.LoadAsync();
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Remapped, result.Outcome);
+        Assert.Equal(2, remapped.SchemaVersion);
+        Assert.Single(remapped.IdentityMigrations);
+    }
+
+    [Fact]
+    public async Task RemapAsync_ExpectedTransformedIdentitySetEqualsReconstructedSet()
+    {
+        using var fixture = new RefreshFixture();
+        var original = await fixture.SeedMissingEntityAsync(useInBothDeclarations: true);
+        var expected = original.Declarations
+            .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+                (declaration.ConceptId,
+                    EntityId: assignment.EntityId == "entity:missing"
+                        ? "entity:business-service"
+                        : assignment.EntityId)))
+            .OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+            .ThenBy(item => item.EntityId, StringComparer.Ordinal)
+            .ToArray();
+
+        await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")]);
+        var remapped = await fixture.LoadAsync();
+        var actual = remapped.Declarations
+            .SelectMany(declaration => declaration.Assignments.Select(assignment =>
+                (declaration.ConceptId, assignment.EntityId)))
+            .OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+            .ThenBy(item => item.EntityId, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public async Task RemapAsync_UncoveredRc400BlocksWithoutWrite()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync(addSecondMissing: true);
+        var before = File.ReadAllBytes(fixture.CatalogPath);
+
+        var result = await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")]);
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Blocked, result.Outcome);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RCL310");
+        Assert.Equal(before, File.ReadAllBytes(fixture.CatalogPath));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("incomplete")]
+    public async Task RemapAsync_MissingOrIncompleteDestinationBlocksWithoutWrite(string scenario)
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync();
+        var before = File.ReadAllBytes(fixture.CatalogPath);
+        var destination = scenario == "missing" ? "entity:not-there" : "entity:business-service";
+        var evidence = scenario == "incomplete"
+            ? fixture.Evidence with
+            {
+                Components = fixture.Evidence.Components.ToDictionary(
+                    item => item.Key,
+                    item => item.Key == destination
+                        ? item.Value with { SourceFingerprint = string.Empty }
+                        : item.Value,
+                    StringComparer.Ordinal)
+            }
+            : fixture.Evidence;
+
+        var result = await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", destination)], evidence: evidence);
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Blocked, result.Outcome);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RCL311");
+        Assert.Equal(before, File.ReadAllBytes(fixture.CatalogPath));
+    }
+
+    [Theory]
+    [InlineData("duplicate")]
+    [InlineData("conflict")]
+    [InlineData("chain")]
+    [InlineData("unused")]
+    public async Task RemapAsync_DuplicateConflictChainCycleOrUnusedMappingBlocks(string scenario)
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync(includeDestinationInDeclaration: scenario == "conflict");
+        var before = File.ReadAllBytes(fixture.CatalogPath);
+        IReadOnlyList<ReviewedConceptIdentityMapping> mappings = scenario switch
+        {
+            "duplicate" =>
+            [
+                new("entity:missing", "entity:business-service"),
+                new("entity:missing", "entity:model")
+            ],
+            "chain" =>
+            [
+                new("entity:missing", "entity:other-missing"),
+                new("entity:other-missing", "entity:business-service")
+            ],
+            "unused" =>
+            [
+                new("entity:missing", "entity:business-service"),
+                new("entity:unused", "entity:model")
+            ],
+            _ => [new("entity:missing", "entity:business-service")]
+        };
+
+        var result = await fixture.RemapAsync(mappings);
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Blocked, result.Outcome);
+        Assert.Equal(before, File.ReadAllBytes(fixture.CatalogPath));
+    }
+
+    [Fact]
+    public async Task RemapAsync_AllowsOnlyRemainingRc401Rc402Diagnostics()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync(leaveExistingAssignmentStale: true);
+
+        var result = await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")]);
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Remapped, result.Outcome);
+        Assert.Equal(1, result.RemainingStaleAssignmentCount);
+        Assert.All(result.Diagnostics, item =>
+            Assert.Contains(item.Code, new[] { "RC401", "RC402" }));
+    }
+
+    [Fact]
+    public async Task RemapAsync_PreservesReviewedSemanticsAndOriginalDeclarationReview()
+    {
+        using var fixture = new RefreshFixture();
+        var original = await fixture.SeedMissingEntityAsync();
+
+        await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")]);
+        var remapped = await fixture.LoadAsync();
+
+        Assert.Equal(
+            original.Declarations.OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+                .Select(item => (item.ConceptId, item.Definition, item.AnchorPolicy,
+                    item.AnchorTokens, item.QualificationSupportTokens, item.ContextSupportTokens,
+                    item.Provenance, item.Review)),
+            remapped.Declarations.OrderBy(item => item.ConceptId, StringComparer.Ordinal)
+                .Select(item => (item.ConceptId, item.Definition, item.AnchorPolicy,
+                    item.AnchorTokens, item.QualificationSupportTokens, item.ContextSupportTokens,
+                    item.Provenance, item.Review)));
+    }
+
+    [Fact]
+    public async Task RemapAsync_GitOrCatalogRacePreservesPreviousOrConcurrentCatalog()
+    {
+        using var fixture = new RefreshFixture();
+        await fixture.SeedMissingEntityAsync();
+        const string winner = "{\"winner\":true}";
+        var git = new MutatingGitInfoProvider(fixture.CatalogPath, winner, fixture.Git);
+
+        var result = await fixture.RemapAsync(
+            [new ReviewedConceptIdentityMapping("entity:missing", "entity:business-service")],
+            gitInfo: git);
+
+        Assert.Equal(ReviewedConceptRemapOutcome.Blocked, result.Outcome);
+        Assert.Equal(winner, File.ReadAllText(fixture.CatalogPath));
+    }
+
+    [Fact]
     public async Task PromoteAsync_FeatureToMainPreservesTwentyFiveReviewedDeclarations()
     {
         using var fixture = new PromotionFixture();
@@ -1003,7 +1213,9 @@ public sealed class ReviewedConceptLifecycleServiceTests
             BranchRoot = Path.Combine(_root.Path, "external", "main");
             Evidence = ReviewedConceptTestData.Evidence();
             Git = new GitInfo(true, Evidence.Branch, "head", null, true);
-            Service = new ReviewedConceptLifecycleService(gitInfo: new StaticGitInfoProvider(Git));
+            Service = new ReviewedConceptLifecycleService(
+                gitInfo: new StaticGitInfoProvider(Git),
+                timeProvider: new FixedTimeProvider(Now));
         }
 
         public string RepositoryRoot { get; }
@@ -1011,18 +1223,37 @@ public sealed class ReviewedConceptLifecycleServiceTests
         public string CatalogPath => new LocalReviewedConceptStore().GetPath(BranchRoot);
         public ReviewedConceptEvidenceContext Evidence { get; }
         public GitInfo Git { get; }
+        public DateTimeOffset Now { get; } = new(2026, 9, 13, 15, 30, 0, TimeSpan.Zero);
         public ReviewedConceptLifecycleService Service { get; }
 
         public Task<ReviewedConceptRefreshResult> RefreshAsync(
             GitInfo? analyzedGit = null,
             IGitInfoProvider? gitInfo = null) =>
             new ReviewedConceptLifecycleService(
-                gitInfo: gitInfo ?? new StaticGitInfoProvider(Git)).RefreshAsync(
+                gitInfo: gitInfo ?? new StaticGitInfoProvider(Git),
+                timeProvider: new FixedTimeProvider(Now)).RefreshAsync(
                 "demo",
                 RepositoryRoot,
                 BranchRoot,
                 Evidence,
                 analyzedGit ?? Git);
+
+        public Task<ReviewedConceptRemapResult> RemapAsync(
+            IReadOnlyList<ReviewedConceptIdentityMapping> mappings,
+            string reviewer = "alice",
+            ReviewedConceptEvidenceContext? evidence = null,
+            GitInfo? analyzedGit = null,
+            IGitInfoProvider? gitInfo = null) =>
+            new ReviewedConceptLifecycleService(
+                gitInfo: gitInfo ?? new StaticGitInfoProvider(Git),
+                timeProvider: new FixedTimeProvider(Now)).RemapAsync(
+                "demo",
+                RepositoryRoot,
+                BranchRoot,
+                evidence ?? Evidence,
+                analyzedGit ?? Git,
+                reviewer,
+                mappings);
 
         public async Task<ReviewedConceptCatalog> SeedStaleAsync()
         {
@@ -1058,16 +1289,53 @@ public sealed class ReviewedConceptLifecycleServiceTests
                 ReviewedConceptSerializer.Serialize(ReviewedConceptTestData.Catalog()));
         }
 
-        public async Task SeedMissingEntityAsync()
+        public async Task<ReviewedConceptCatalog> SeedMissingEntityAsync(
+            bool useInBothDeclarations = false,
+            bool addSecondMissing = false,
+            bool includeDestinationInDeclaration = false,
+            bool leaveExistingAssignmentStale = false)
         {
             var catalog = ReviewedConceptTestData.Catalog();
+            var assignments = new List<ReviewedConceptAssignment>
+            {
+                new("entity:missing", "src/Missing.cs:1", "missing")
+            };
+            if (includeDestinationInDeclaration)
+            {
+                assignments.Add(ReviewedConceptTestData.Assignment("entity:business-service"));
+            }
+
             var declaration = catalog.Declarations[0] with
             {
-                Assignments = [new ReviewedConceptAssignment("entity:missing", "src/Missing.cs:1", "missing")]
+                Assignments = assignments
             };
             declaration = ReviewedConceptTestData.WithFingerprint(declaration);
-            catalog = catalog with { Declarations = [declaration, .. catalog.Declarations.Skip(1)] };
+            var second = catalog.Declarations[1];
+            if (useInBothDeclarations)
+            {
+                second = ReviewedConceptTestData.WithFingerprint(second with
+                {
+                    Assignments = [new("entity:missing", "src/Missing.cs:1", "missing")]
+                });
+            }
+            else if (addSecondMissing)
+            {
+                second = ReviewedConceptTestData.WithFingerprint(second with
+                {
+                    Assignments = [new("entity:other-missing", "src/Other.cs:1", "missing")]
+                });
+            }
+            else if (leaveExistingAssignmentStale)
+            {
+                second = ReviewedConceptTestData.WithFingerprint(second with
+                {
+                    Assignments = [second.Assignments[0] with { SourceFingerprint = "stale" }]
+                });
+            }
+
+            catalog = catalog with { Declarations = [declaration, second] };
             await WriteAsync(BranchRoot, ReviewedConceptSerializer.Serialize(catalog));
+            return catalog;
         }
 
         public async Task<ReviewedConceptCatalog> SeedSchemaTwoStaleAsync()
@@ -1117,6 +1385,11 @@ public sealed class ReviewedConceptLifecycleServiceTests
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(info);
         }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class MutatingGitInfoProvider(
