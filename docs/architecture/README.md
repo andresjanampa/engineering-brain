@@ -37,3 +37,5 @@ Snapshot schema 3 adds safe file timestamps, file changes, project reuse decisio
 Project Memory has an independent knowledge schema. Its manifest controls incremental reuse and stale managed-note deletion; unmanaged files are outside its ownership. Notes use deterministic LF output, collision-safe filenames, bounded collections, relative source evidence, and resolvable wiki links.
 
 Reviewed semantic concepts remain a separate human-reviewed layer. Runtime loading is read-only; cross-branch lifecycle operations are defined by [ADR 0010](../decisions/0010-reviewed-concept-lifecycle.md) and do not change Project Memory ownership or retrieval semantics.
+
+Remote reasoning has a separate exact-request security boundary defined by [ADR 0011](../decisions/0011-complete-security-policy-coverage.md). Deterministic inspection and five fixed outbound BLOCK policies run before providers can receive an `ApprovedReasoningRequest`; projected previews cannot authorize transport.
