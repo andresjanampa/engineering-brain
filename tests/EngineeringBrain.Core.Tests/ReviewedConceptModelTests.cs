@@ -6,6 +6,32 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class ReviewedConceptModelTests
 {
     [Fact]
+    public void IdentityMigration_CarriesReviewedIdentityDecisionAndEvidence()
+    {
+        var review = new ReviewedConceptReview(
+            "reviewer",
+            1,
+            new DateTimeOffset(2026, 9, 13, 12, 0, 0, TimeSpan.Zero));
+        var migration = new ReviewedConceptIdentityMigration(
+            "repository",
+            "main",
+            "main--key",
+            "entity:old",
+            "entity:new",
+            ["concept-a", "concept-b"],
+            "previous-catalog",
+            "src/New.cs:10",
+            "new-source-fingerprint",
+            review,
+            "migration-fingerprint");
+
+        Assert.Equal("entity:old", migration.OldEntityId);
+        Assert.Equal("entity:new", migration.NewEntityId);
+        Assert.Equal(["concept-a", "concept-b"], migration.AffectedConceptIds);
+        Assert.Equal(review, migration.Review);
+    }
+
+    [Fact]
     public void ResolutionResult_AbsentContainsNoProfilesOrDiagnostics()
     {
         var result = ReviewedConceptResolutionResult.Absent;
