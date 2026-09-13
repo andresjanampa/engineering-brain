@@ -6,6 +6,53 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class InitiativeAnalysisServiceTests
 {
     [Fact]
+    public async Task InitiativeStore_NewArtifactWritesSchemaThreeWithTwoExactAssessments()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var store = new LocalInitiativeAnalysisStore(fixture.Root);
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business"),
+            InitiativeAnalysisTestData.Analysis());
+
+        var result = await new InitiativeAnalysisService(provider, store: store).AnalyzeAsync(
+            Request(memory, "Add business execution.") with { PersistResult = true });
+        var persisted = await store.LoadAsync(result.SavedAnalysisPath!);
+
+        Assert.Equal(3, persisted.SchemaVersion);
+        Assert.Equal(2, persisted.OutboundPolicyAssessments!.Count);
+        Assert.All(persisted.OutboundPolicyAssessments, assessment =>
+            Assert.Equal(OutboundAssessmentKind.Exact, assessment.AssessmentKind));
+    }
+
+    [Fact]
+    public async Task InitiativeStore_SchemaTwoLoadsAssessmentAsNotRecorded()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var store = new LocalInitiativeAnalysisStore(fixture.Root);
+        var provider = Provider(
+            InitiativeAnalysisTestData.Understanding("business"),
+            InitiativeAnalysisTestData.Analysis());
+        var result = await new InitiativeAnalysisService(provider, store: store).AnalyzeAsync(
+            Request(memory, "Add business execution.") with { PersistResult = true });
+        var legacy = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(result.SavedAnalysisPath!))!.AsObject();
+        legacy["schemaVersion"] = 2;
+        legacy.Remove("outboundPolicyAssessments");
+        var legacyJson = legacy.ToJsonString();
+        await File.WriteAllTextAsync(result.SavedAnalysisPath!, legacyJson);
+
+        var persisted = await store.LoadAsync(result.SavedAnalysisPath!);
+
+        Assert.All(persisted.OutboundPolicyAssessments!, assessment =>
+        {
+            Assert.Equal(OutboundAssessmentKind.NotRecorded, assessment.AssessmentKind);
+            Assert.False(assessment.IsAllowed);
+        });
+        Assert.Equal(legacyJson, await File.ReadAllTextAsync(result.SavedAnalysisPath!));
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_ReusesThePreparedApprovedCallOneInstance()
     {
         using var fixture = new InitiativeMemoryFixture();
@@ -323,7 +370,7 @@ public sealed class InitiativeAnalysisServiceTests
     }
 
     [Fact]
-    public async Task AnalyzeAsync_GovernsAfterEvidenceValidationAndPersistsSchemaTwo()
+    public async Task AnalyzeAsync_GovernsAfterEvidenceValidationAndPersistsSchemaThree()
     {
         using var fixture = new InitiativeMemoryFixture();
         var memory = await fixture.CreateMemoryAsync();
@@ -344,7 +391,7 @@ public sealed class InitiativeAnalysisServiceTests
         var result = await service.AnalyzeAsync(Request(memory, "Upload the repository.") with { PersistResult = true });
         var persisted = await store.LoadAsync(result.SavedAnalysisPath!);
 
-        Assert.Equal(2, persisted.SchemaVersion);
+        Assert.Equal(3, persisted.SchemaVersion);
         Assert.Equal(PolicyOutcome.Blocked, persisted.PolicyOutcome);
         var persistedRecommendation = Assert.Single(persisted.Recommendations);
         Assert.Equal(RecommendationDisposition.Rejected, persistedRecommendation.Disposition);

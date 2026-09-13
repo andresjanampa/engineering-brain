@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using EngineeringBrain.Core;
 using EngineeringBrain.Infrastructure;
 
@@ -6,6 +7,74 @@ namespace EngineeringBrain.Core.Tests;
 
 public sealed class RemoteContextPreviewTests
 {
+    [Fact]
+    public async Task PreviewStore_NewArtifactWritesSchemaTwoAndAssessmentKinds()
+    {
+        using var memoryFixture = new InitiativeMemoryFixture();
+        var memory = await memoryFixture.CreateMemoryAsync();
+        var output = Path.Combine(Path.GetTempPath(), $"brain-preview-schema-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new RemoteContextPreviewStore(output);
+            var preview = await new RemoteContextPreviewService(store: store).CreateAsync(
+                "initiative.md",
+                "Add business analyzer support.",
+                memory,
+                "model-a",
+                "model-b",
+                "low",
+                "medium");
+
+            var persisted = await store.LoadAsync(preview.ManifestPath);
+
+            Assert.Equal(2, persisted.PreviewSchemaVersion);
+            Assert.Equal(OutboundAssessmentKind.Exact, persisted.Call1PolicyAssessment!.AssessmentKind);
+            Assert.Equal(OutboundAssessmentKind.Projected, persisted.Call2PolicyAssessment!.AssessmentKind);
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, true);
+        }
+    }
+
+    [Fact]
+    public async Task PreviewStore_SchemaOneLoadsBothAssessmentsAsNotRecorded()
+    {
+        using var memoryFixture = new InitiativeMemoryFixture();
+        var memory = await memoryFixture.CreateMemoryAsync();
+        var output = Path.Combine(Path.GetTempPath(), $"brain-preview-legacy-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new RemoteContextPreviewStore(output);
+            var preview = await new RemoteContextPreviewService(store: store).CreateAsync(
+                "initiative.md",
+                "Add business analyzer support.",
+                memory,
+                "model-a",
+                "model-b",
+                "low",
+                "medium");
+            var legacy = JsonNode.Parse(await File.ReadAllTextAsync(preview.ManifestPath))!.AsObject();
+            legacy["previewSchemaVersion"] = 1;
+            legacy.Remove("call1PolicyAssessment");
+            legacy.Remove("call2PolicyAssessment");
+            var legacyJson = legacy.ToJsonString();
+            await File.WriteAllTextAsync(preview.ManifestPath, legacyJson);
+
+            var persisted = await store.LoadAsync(preview.ManifestPath);
+
+            Assert.Equal(OutboundAssessmentKind.NotRecorded, persisted.Call1PolicyAssessment!.AssessmentKind);
+            Assert.Equal(OutboundAssessmentKind.NotRecorded, persisted.Call2PolicyAssessment!.AssessmentKind);
+            Assert.False(persisted.Call1PolicyAssessment.IsAllowed);
+            Assert.False(persisted.Call2PolicyAssessment.IsAllowed);
+            Assert.Equal(legacyJson, await File.ReadAllTextAsync(preview.ManifestPath));
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, true);
+        }
+    }
+
     [Fact]
     public async Task PrepareAsync_CallOneIsExactAndCallTwoIsProjected()
     {

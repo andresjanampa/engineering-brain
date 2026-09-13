@@ -132,7 +132,7 @@ public sealed class RemoteContextPreviewService
         var projectNotes = context.Segments.Where(segment => segment.Kind == ContextSegmentKind.ProjectNote).ToArray();
         var componentNotes = context.Segments.Where(segment => segment.Kind == ContextSegmentKind.ComponentNote).ToArray();
         var result = new RemoteContextPreview(
-            1,
+            RemoteContextPreviewStore.CurrentSchemaVersion,
             Path.GetFileName(initiativeFileName),
             memory.SourceSnapshot.Repository.Id,
             memory.SourceSnapshot.Git.Branch ?? "(no branch)",
@@ -198,10 +198,14 @@ public sealed record PersistedRemoteContextPreview(
     PreviewCall2Manifest Call2,
     OutboundValidationResult Security,
     int HardTokenLimit,
-    bool WithinBudget);
+    bool WithinBudget,
+    OutboundPolicyAssessment? Call1PolicyAssessment = null,
+    OutboundPolicyAssessment? Call2PolicyAssessment = null);
 
 public sealed class RemoteContextPreviewStore
 {
+    public const int CurrentSchemaVersion = 2;
+
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
     private readonly string _dataRoot;
     public RemoteContextPreviewStore(string? dataRoot = null) => _dataRoot = dataRoot ?? Path.Combine(
@@ -216,15 +220,49 @@ public sealed class RemoteContextPreviewStore
         var persisted = new PersistedRemoteContextPreview(preview.PreviewSchemaVersion, preview.InitiativeFileName,
             preview.RepositoryId, preview.Branch, preview.InterpretationModel, preview.ReasoningModel,
             preview.InterpretationReasoningEffort, preview.AnalysisReasoningEffort, preview.Call1, preview.Call2,
-            preview.Security, preview.HardTokenLimit, preview.WithinBudget);
+            preview.Security, preview.HardTokenLimit, preview.WithinBudget,
+            preview.Call1PolicyAssessment, preview.Call2PolicyAssessment);
         var json = JsonSerializer.Serialize(persisted, JsonOptions).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
         await File.WriteAllTextAsync(path, json, new UTF8Encoding(false), cancellationToken);
         return path;
     }
 
+    public async Task<PersistedRemoteContextPreview> LoadAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await File.ReadAllTextAsync(path, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("previewSchemaVersion", out var schemaVersion)
+            || schemaVersion.ValueKind != JsonValueKind.Number
+            || !schemaVersion.TryGetInt32(out var version))
+        {
+            throw new InvalidDataException("Remote context preview does not declare a valid previewSchemaVersion.");
+        }
+
+        if (version is not 1 and not CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"Remote context preview schema {version} is unsupported; expected 1 or {CurrentSchemaVersion}. Historical previews are not rewritten automatically.");
+        }
+
+        var persisted = JsonSerializer.Deserialize<PersistedRemoteContextPreview>(json, JsonOptions)
+            ?? throw new InvalidDataException("Remote context preview JSON could not be deserialized.");
+        return persisted with
+        {
+            Call1PolicyAssessment = persisted.Call1PolicyAssessment ?? OutboundPolicyAssessment.NotRecorded,
+            Call2PolicyAssessment = persisted.Call2PolicyAssessment ?? OutboundPolicyAssessment.NotRecorded
+        };
+    }
+
     private static JsonSerializerOptions CreateOptions()
     {
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true
+        };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }

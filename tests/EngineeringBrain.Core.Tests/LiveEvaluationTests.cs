@@ -8,6 +8,60 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class LiveEvaluationTests
 {
     [Fact]
+    public async Task LiveStore_NewArtifactWritesSchemaThreeWithExactAssessments()
+    {
+        using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.RunAsync(FakeFactory(fixture));
+        var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+
+        Assert.Equal(3, persisted.LiveResultSchemaVersion);
+        var assessments = Assert.Single(persisted.Cases).OutboundPolicyAssessments;
+        Assert.Equal(2, assessments.Count);
+        Assert.All(assessments, assessment =>
+            Assert.Equal(OutboundAssessmentKind.Exact, assessment.AssessmentKind));
+    }
+
+    [Fact]
+    public async Task LiveStore_SchemaTwoLoadsAssessmentAsNotRecorded()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var result = await fixture.RunAsync(FakeFactory(fixture));
+        var legacy = JsonNode.Parse(await File.ReadAllTextAsync(result.SummaryPath))!.AsObject();
+        legacy["liveResultSchemaVersion"] = 2;
+        foreach (var item in legacy["cases"]!.AsArray())
+        {
+            item!.AsObject().Remove("outboundPolicyAssessments");
+        }
+        var legacyJson = legacy.ToJsonString();
+        await File.WriteAllTextAsync(result.SummaryPath, legacyJson);
+
+        var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+
+        var assessment = Assert.Single(Assert.Single(persisted.Cases).OutboundPolicyAssessments);
+        Assert.Equal(OutboundAssessmentKind.NotRecorded, assessment.AssessmentKind);
+        Assert.False(assessment.IsAllowed);
+        Assert.Equal(legacyJson, await File.ReadAllTextAsync(result.SummaryPath));
+    }
+
+    [Fact]
+    public async Task LegacyMissingAssessmentIsNeverInterpretedAsAllowed()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var result = await fixture.RunAsync(FakeFactory(fixture));
+        var legacy = JsonNode.Parse(await File.ReadAllTextAsync(result.SummaryPath))!.AsObject();
+        legacy["liveResultSchemaVersion"] = 2;
+        legacy["cases"]![0]!.AsObject().Remove("outboundPolicyAssessments");
+        await File.WriteAllTextAsync(result.SummaryPath, legacy.ToJsonString());
+
+        var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
+
+        Assert.DoesNotContain(
+            Assert.Single(persisted.Cases).OutboundPolicyAssessments,
+            assessment => assessment.IsAllowed);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RecordsExactAssessmentForEveryProviderCall()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -619,9 +673,9 @@ public sealed class LiveEvaluationTests
         Assert.Equal(80, result.Aggregate.Usage.ReasoningTokens);
         Assert.True(File.Exists(result.SummaryPath));
         Assert.True(File.Exists(result.ReviewPath));
-        Assert.Equal(2, result.LiveResultSchemaVersion);
+        Assert.Equal(3, result.LiveResultSchemaVersion);
         var persisted = await new LocalLiveEvaluationStore().LoadAsync(result.SummaryPath);
-        Assert.Equal(2, persisted.LiveResultSchemaVersion);
+        Assert.Equal(3, persisted.LiveResultSchemaVersion);
         Assert.NotNull(Assert.Single(persisted.Cases).UnderstandingMetrics!.RequiredCapabilityMatches);
         var review = await File.ReadAllTextAsync(result.ReviewPath);
         Assert.Contains("Initiative understanding [1-5]:", review, StringComparison.Ordinal);
