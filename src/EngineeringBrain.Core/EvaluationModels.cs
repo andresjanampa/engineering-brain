@@ -228,4 +228,6 @@ public sealed record RemoteContextPreview(
     int HardTokenLimit,
     bool WithinBudget,
     string ManifestPath,
-    CandidateRetrievalResult Retrieval);
+    CandidateRetrievalResult Retrieval,
+    OutboundPolicyAssessment Call1PolicyAssessment,
+    OutboundPolicyAssessment Call2PolicyAssessment);
