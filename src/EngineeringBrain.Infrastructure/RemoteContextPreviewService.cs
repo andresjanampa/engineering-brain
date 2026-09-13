@@ -29,7 +29,7 @@ public sealed class RemoteContextPreviewService
     private readonly DeterministicInitiativeInterpreter _interpreter;
     private readonly InitiativeCandidateRetriever _retriever;
     private readonly InitiativeContextBuilder _contextBuilder;
-    private readonly OutboundContextGuard _guard;
+    private readonly OutboundRequestGate _gate;
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
     private readonly RemoteContextPreviewStore _store;
@@ -38,7 +38,7 @@ public sealed class RemoteContextPreviewService
         DeterministicInitiativeInterpreter? interpreter = null,
         InitiativeCandidateRetriever? retriever = null,
         InitiativeContextBuilder? contextBuilder = null,
-        OutboundContextGuard? guard = null,
+        OutboundRequestGate? gate = null,
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
         RemoteContextPreviewStore? store = null)
@@ -48,7 +48,7 @@ public sealed class RemoteContextPreviewService
         _estimator = estimator ?? new TokenEstimator();
         _budget = budget ?? new TokenBudgetOptions();
         _contextBuilder = contextBuilder ?? new InitiativeContextBuilder(estimator: _estimator, budget: _budget);
-        _guard = guard ?? new OutboundContextGuard();
+        _gate = gate ?? new OutboundRequestGate();
         _store = store ?? new RemoteContextPreviewStore();
     }
 
@@ -60,7 +60,7 @@ public sealed class RemoteContextPreviewService
         string reasoningModel,
         string interpretationEffort,
         string analysisEffort,
-        CancellationToken cancellationToken = default) => await CreateAsync(
+        CancellationToken cancellationToken = default) => (await PrepareAsync(
         initiativeFileName,
         initiative,
         memory,
@@ -69,9 +69,29 @@ public sealed class RemoteContextPreviewService
         reasoningModel,
         interpretationEffort,
         analysisEffort,
-        cancellationToken);
+        cancellationToken)).Preview;
 
     public async Task<RemoteContextPreview> CreateAsync(
+        string initiativeFileName,
+        string initiative,
+        ProjectMemorySyncResult memory,
+        ReviewedConceptResolutionResult reviewedConcepts,
+        string interpretationModel,
+        string reasoningModel,
+        string interpretationEffort,
+        string analysisEffort,
+        CancellationToken cancellationToken = default) => (await PrepareAsync(
+        initiativeFileName,
+        initiative,
+        memory,
+        reviewedConcepts,
+        interpretationModel,
+        reasoningModel,
+        interpretationEffort,
+        analysisEffort,
+        cancellationToken)).Preview;
+
+    public async Task<RemoteAnalysisPreparation> PrepareAsync(
         string initiativeFileName,
         string initiative,
         ProjectMemorySyncResult memory,
@@ -83,8 +103,15 @@ public sealed class RemoteContextPreviewService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reviewedConcepts);
-        var call1Security = _guard.ValidateInitiative(initiative);
-        _guard.ThrowIfInvalid(call1Security);
+        var call1Tokens = _estimator.Estimate(initiative) + _estimator.Estimate(InitiativeAnalysisPrompts.Understanding);
+        var call1Request = new ReasoningRequest(
+            ReasoningStage.InitiativeUnderstanding,
+            interpretationModel,
+            InitiativeAnalysisPrompts.Understanding,
+            initiative,
+            _budget.InitiativeOutputTokens,
+            call1Tokens);
+        var approvedCall1 = _gate.ApproveExact(call1Request);
         var understanding = _interpreter.Interpret(initiative);
         var retrieval = _retriever.Retrieve(
             understanding,
@@ -92,15 +119,20 @@ public sealed class RemoteContextPreviewService
             memory.SourceSnapshot,
             reviewedConcepts.Profiles);
         var context = await _contextBuilder.BuildAsync(understanding, retrieval, memory, cancellationToken);
-        var call2Security = _guard.Validate(context);
-        _guard.ThrowIfInvalid(call2Security);
-        var security = Combine(call1Security, call2Security);
-        var call1Tokens = _estimator.Estimate(initiative) + _estimator.Estimate(InitiativeAnalysisPrompts.Understanding);
         var call2Tokens = context.EstimatedTokens + _estimator.Estimate(InitiativeAnalysisPrompts.ArchitectureAnalysis);
+        var call2Request = new ReasoningRequest(
+            ReasoningStage.ArchitectureAnalysis,
+            reasoningModel,
+            InitiativeAnalysisPrompts.ArchitectureAnalysis,
+            context.Content,
+            _budget.ReasoningOutputTokens,
+            call2Tokens);
+        var call2Assessment = _gate.AssessProjected(call2Request, context);
+        var security = ToLegacySummary(approvedCall1.Assessment, call2Assessment);
         var projectNotes = context.Segments.Where(segment => segment.Kind == ContextSegmentKind.ProjectNote).ToArray();
         var componentNotes = context.Segments.Where(segment => segment.Kind == ContextSegmentKind.ComponentNote).ToArray();
         var result = new RemoteContextPreview(
-            1,
+            RemoteContextPreviewStore.CurrentSchemaVersion,
             Path.GetFileName(initiativeFileName),
             memory.SourceSnapshot.Repository.Id,
             memory.SourceSnapshot.Git.Branch ?? "(no branch)",
@@ -122,22 +154,36 @@ public sealed class RemoteContextPreviewService
             _budget.MaximumReasoningInputTokens,
             call1Tokens <= _budget.MaximumInitiativeInputTokens && call2Tokens <= _budget.MaximumReasoningInputTokens,
             string.Empty,
-            retrieval);
+            retrieval,
+            approvedCall1.Assessment,
+            call2Assessment);
         var path = await _store.SaveAsync(result, cancellationToken);
-        return result with { ManifestPath = path };
+        return new RemoteAnalysisPreparation(result with { ManifestPath = path }, approvedCall1);
     }
 
-    private static OutboundValidationResult Combine(OutboundValidationResult first, OutboundValidationResult second)
+    private static OutboundValidationResult ToLegacySummary(params OutboundPolicyAssessment[] assessments)
     {
-        var codes = first.DiagnosticCodes.Concat(second.DiagnosticCodes).Distinct(StringComparer.Ordinal).ToArray();
-        return new OutboundValidationResult(codes.Length == 0,
-            first.SourceBodyFindings + second.SourceBodyFindings,
-            first.SecretFindings + second.SecretFindings,
-            first.AbsolutePathFindings + second.AbsolutePathFindings,
-            first.RawSnapshotFindings + second.RawSnapshotFindings,
-            codes);
+        var results = assessments.SelectMany(assessment => assessment.Results).ToArray();
+        var diagnostics = assessments.SelectMany(assessment => assessment.Diagnostics)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return new OutboundValidationResult(
+            assessments.All(assessment => assessment.IsAllowed),
+            Count(PolicyContentScope.SourceBodies),
+            Count(PolicyContentScope.Secrets),
+            Count(PolicyContentScope.AbsoluteLocalPaths),
+            Count(PolicyContentScope.RawSnapshot),
+            diagnostics);
+
+        int Count(PolicyContentScope category) => results
+            .Where(result => result.Category == category && result.Outcome == OutboundPolicyOutcome.Blocked)
+            .Sum(result => result.FindingCount);
     }
 }
+
+public sealed record RemoteAnalysisPreparation(
+    RemoteContextPreview Preview,
+    ApprovedReasoningRequest ApprovedCall1);
 
 public sealed record PersistedRemoteContextPreview(
     int PreviewSchemaVersion,
@@ -152,10 +198,14 @@ public sealed record PersistedRemoteContextPreview(
     PreviewCall2Manifest Call2,
     OutboundValidationResult Security,
     int HardTokenLimit,
-    bool WithinBudget);
+    bool WithinBudget,
+    OutboundPolicyAssessment? Call1PolicyAssessment = null,
+    OutboundPolicyAssessment? Call2PolicyAssessment = null);
 
 public sealed class RemoteContextPreviewStore
 {
+    public const int CurrentSchemaVersion = 2;
+
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
     private readonly string _dataRoot;
     public RemoteContextPreviewStore(string? dataRoot = null) => _dataRoot = dataRoot ?? Path.Combine(
@@ -170,15 +220,49 @@ public sealed class RemoteContextPreviewStore
         var persisted = new PersistedRemoteContextPreview(preview.PreviewSchemaVersion, preview.InitiativeFileName,
             preview.RepositoryId, preview.Branch, preview.InterpretationModel, preview.ReasoningModel,
             preview.InterpretationReasoningEffort, preview.AnalysisReasoningEffort, preview.Call1, preview.Call2,
-            preview.Security, preview.HardTokenLimit, preview.WithinBudget);
+            preview.Security, preview.HardTokenLimit, preview.WithinBudget,
+            preview.Call1PolicyAssessment, preview.Call2PolicyAssessment);
         var json = JsonSerializer.Serialize(persisted, JsonOptions).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
         await File.WriteAllTextAsync(path, json, new UTF8Encoding(false), cancellationToken);
         return path;
     }
 
+    public async Task<PersistedRemoteContextPreview> LoadAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await File.ReadAllTextAsync(path, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("previewSchemaVersion", out var schemaVersion)
+            || schemaVersion.ValueKind != JsonValueKind.Number
+            || !schemaVersion.TryGetInt32(out var version))
+        {
+            throw new InvalidDataException("Remote context preview does not declare a valid previewSchemaVersion.");
+        }
+
+        if (version is not 1 and not CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"Remote context preview schema {version} is unsupported; expected 1 or {CurrentSchemaVersion}. Historical previews are not rewritten automatically.");
+        }
+
+        var persisted = JsonSerializer.Deserialize<PersistedRemoteContextPreview>(json, JsonOptions)
+            ?? throw new InvalidDataException("Remote context preview JSON could not be deserialized.");
+        return persisted with
+        {
+            Call1PolicyAssessment = persisted.Call1PolicyAssessment ?? OutboundPolicyAssessment.NotRecorded,
+            Call2PolicyAssessment = persisted.Call2PolicyAssessment ?? OutboundPolicyAssessment.NotRecorded
+        };
+    }
+
     private static JsonSerializerOptions CreateOptions()
     {
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true
+        };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }

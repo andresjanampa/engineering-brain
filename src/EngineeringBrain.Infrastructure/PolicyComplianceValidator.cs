@@ -9,12 +9,19 @@ public interface IRecommendationPolicy
 
 public static class SystemPolicyCatalog
 {
-    public const string RemoteCompleteRepositoryId = "SYS_REMOTE_COMPLETE_REPOSITORY";
+    public const string RemoteCompleteRepositoryId = SystemSecurityPolicyCatalog.RemoteCompleteRepositoryId;
+    public const string RemoteRawSnapshotId = SystemSecurityPolicyCatalog.RemoteRawSnapshotId;
+    public const string RemoteSourceBodiesId = SystemSecurityPolicyCatalog.RemoteSourceBodiesId;
+    public const string RemoteSecretsId = SystemSecurityPolicyCatalog.RemoteSecretsId;
+    public const string RemoteAbsolutePathsId = SystemSecurityPolicyCatalog.RemoteAbsolutePathsId;
 
     public static IReadOnlyList<IRecommendationPolicy> Policies { get; } =
-        Array.AsReadOnly<IRecommendationPolicy>([new RemoteCompleteRepositoryPolicy()]);
+        Array.AsReadOnly<IRecommendationPolicy>(SystemSecurityPolicyCatalog.Definitions
+            .Select(definition => new RemoteProhibitedContentPolicy(definition))
+            .ToArray());
 
-    private sealed class RemoteCompleteRepositoryPolicy : IRecommendationPolicy
+    private sealed class RemoteProhibitedContentPolicy(SystemSecurityPolicyDefinition definition)
+        : IRecommendationPolicy
     {
         private static readonly PolicyProvenance Provenance = new(
             "Engineering Brain",
@@ -38,27 +45,21 @@ public static class SystemPolicyCatalog
             }
 
             if (actions.Any(action => action.Boundary == PolicyActionBoundary.Remote
-                && action.ContentScope == PolicyContentScope.CompleteRepository))
+                && action.ContentScope == definition.Category))
             {
-                return Result(
-                    PolicyComplianceStatus.Violated,
-                    "The recommendation would transmit a complete repository across a remote boundary.");
+                return Result(PolicyComplianceStatus.Violated, definition.BlockedDiagnostic);
             }
 
             if (actions.Any(action => action.Boundary == PolicyActionBoundary.Unknown
                 || action.Boundary == PolicyActionBoundary.Remote
                 && action.ContentScope == PolicyContentScope.Unknown))
             {
-                return Result(
-                    PolicyComplianceStatus.Unknown,
-                    "Remote repository transmission is declared, but a policy-relevant boundary or content scope is unknown.");
+                return Result(PolicyComplianceStatus.Unknown, definition.UnknownDiagnostic);
             }
 
             if (actions.Any(action => action.Boundary == PolicyActionBoundary.Remote))
             {
-                return Result(
-                    PolicyComplianceStatus.Compliant,
-                    "The declared remote transmission does not include a complete repository.");
+                return Result(PolicyComplianceStatus.Compliant, definition.AllowedDiagnostic);
             }
 
             return Result(
@@ -66,11 +67,11 @@ public static class SystemPolicyCatalog
                 "The declared transmission does not cross a remote boundary.");
         }
 
-        private static PolicyComplianceResult Result(PolicyComplianceStatus status, string diagnostic) => new(
-            RemoteCompleteRepositoryId,
-            1,
+        private PolicyComplianceResult Result(PolicyComplianceStatus status, string diagnostic) => new(
+            definition.PolicyId,
+            definition.PolicyVersion,
             PolicySourceKind.System,
-            PolicySeverity.Block,
+            definition.Severity,
             status,
             diagnostic,
             Provenance);

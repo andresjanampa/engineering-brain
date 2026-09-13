@@ -8,7 +8,7 @@ namespace EngineeringBrain.Infrastructure;
 
 public sealed partial class LocalLiveEvaluationStore
 {
-    public const int CurrentResultSchemaVersion = 2;
+    public const int CurrentResultSchemaVersion = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
     private readonly string _dataRoot;
@@ -68,14 +68,21 @@ public sealed partial class LocalLiveEvaluationStore
             throw new InvalidDataException("Live evaluation result does not declare a valid liveResultSchemaVersion.");
         }
 
-        if (version != CurrentResultSchemaVersion)
+        if (version is not 2 and not CurrentResultSchemaVersion)
         {
             throw new InvalidDataException(
-                $"Live evaluation result schema {version} is unsupported; expected {CurrentResultSchemaVersion}. Historical runs are not rewritten automatically.");
+                $"Live evaluation result schema {version} is unsupported; expected 2 or {CurrentResultSchemaVersion}. Historical runs are not rewritten automatically.");
         }
 
-        return JsonSerializer.Deserialize<LiveEvaluationRun>(json, JsonOptions)
+        var run = JsonSerializer.Deserialize<LiveEvaluationRun>(json, JsonOptions)
             ?? throw new InvalidDataException("Live evaluation result JSON could not be deserialized.");
+        return run with
+        {
+            Cases = run.Cases.Select(item => item with
+            {
+                OutboundPolicyAssessments = item.OutboundPolicyAssessments ?? [OutboundPolicyAssessment.NotRecorded]
+            }).ToArray()
+        };
     }
 
     public static string RenderReview(LiveEvaluationRun run)
@@ -144,7 +151,13 @@ public sealed partial class LocalLiveEvaluationStore
     public static string? Redact(string? value)
     {
         if (value is null) return null;
-        return Authorization().Replace(OpenAIKey().Replace(SecretAssignment().Replace(value, "$1=[REDACTED]"), "[REDACTED]"), "Authorization: [REDACTED]");
+        var redacted = Authorization().Replace(
+            OpenAIKey().Replace(
+                SecretAssignment().Replace(value, "$1=[REDACTED]"),
+                "[REDACTED]"),
+            "Authorization: [REDACTED]");
+        var singleLine = string.Concat(redacted.Select(character => char.IsControl(character) ? ' ' : character));
+        return singleLine.Length <= 512 ? singleLine : singleLine[..509] + "...";
     }
 
     private static void AppendJson(StringBuilder builder, string title, object? value)

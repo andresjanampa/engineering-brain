@@ -256,10 +256,11 @@ public sealed class LiveEvaluationMetricCalculator
             contexts.Length == 0 ? 0 : contexts.Average(),
             EvaluationMetricsCalculator.Median(contexts),
             contexts.Length == 0 ? 0 : contexts.Max(),
-            OutboundSent(results, value => value.SourceBodyFindings),
-            OutboundSent(results, value => value.SecretFindings),
-            OutboundSent(results, value => value.AbsolutePathFindings),
-            OutboundSent(results, value => value.RawSnapshotFindings),
+            OutboundFindings(results, PolicyContentScope.CompleteRepository),
+            OutboundFindings(results, PolicyContentScope.SourceBodies),
+            OutboundFindings(results, PolicyContentScope.Secrets),
+            OutboundFindings(results, PolicyContentScope.AbsoluteLocalPaths),
+            OutboundFindings(results, PolicyContentScope.RawSnapshot),
             new LiveUsageSummary(
                 calls.Length,
                 calls.Length + calls.Sum(value => value.Retries),
@@ -274,8 +275,13 @@ public sealed class LiveEvaluationMetricCalculator
 
         static double Average(IReadOnlyList<LiveEvaluationCaseResult> source, Func<LiveEvaluationCaseResult, double> selector) =>
             source.Count == 0 ? 0 : source.Average(selector);
-        static int OutboundSent(IReadOnlyList<LiveEvaluationCaseResult> source, Func<OutboundValidationResult, int> selector) =>
-            source.SelectMany(value => value.SecurityChecks).Where(value => value.IsValid).Sum(selector);
+        static int OutboundFindings(
+            IReadOnlyList<LiveEvaluationCaseResult> source,
+            PolicyContentScope category) => source
+            .SelectMany(value => value.OutboundPolicyAssessments)
+            .SelectMany(assessment => assessment.Results)
+            .Where(result => result.Category == category && result.Outcome == OutboundPolicyOutcome.Blocked)
+            .Sum(result => result.FindingCount);
     }
 
     private LiveFieldCoverage Coverage(string field, IReadOnlyList<string> expected, IReadOnlyList<string> actual)

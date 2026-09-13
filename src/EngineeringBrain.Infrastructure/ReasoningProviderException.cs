@@ -2,22 +2,29 @@ using EngineeringBrain.Core;
 
 namespace EngineeringBrain.Infrastructure;
 
+public enum ReasoningProviderFailureCode
+{
+    Timeout,
+    InvalidStructuredOutput,
+    TransportFailure,
+    NoValidResult
+}
+
 public sealed class ReasoningProviderException : InvalidOperationException
 {
     public ReasoningProviderException(
+        ReasoningProviderFailureCode failureCode,
         ReasoningStage stage,
-        bool structuredOutputFailure,
         long durationMilliseconds,
         int retries,
-        string message,
         int? actualInputTokens = null,
         int? cachedInputTokens = null,
         int? actualOutputTokens = null,
         int? reasoningTokens = null)
-        : base(message)
+        : base(MessageFor(failureCode))
     {
+        FailureCode = failureCode;
         Stage = stage;
-        StructuredOutputFailure = structuredOutputFailure;
         DurationMilliseconds = durationMilliseconds;
         Retries = retries;
         ActualInputTokens = actualInputTokens;
@@ -26,12 +33,22 @@ public sealed class ReasoningProviderException : InvalidOperationException
         ReasoningTokens = reasoningTokens;
     }
 
+    public ReasoningProviderFailureCode FailureCode { get; }
     public ReasoningStage Stage { get; }
-    public bool StructuredOutputFailure { get; }
+    public bool StructuredOutputFailure => FailureCode == ReasoningProviderFailureCode.InvalidStructuredOutput;
     public long DurationMilliseconds { get; }
     public int Retries { get; }
     public int? ActualInputTokens { get; }
     public int? CachedInputTokens { get; }
     public int? ActualOutputTokens { get; }
     public int? ReasoningTokens { get; }
+
+    private static string MessageFor(ReasoningProviderFailureCode failureCode) => failureCode switch
+    {
+        ReasoningProviderFailureCode.Timeout => "The reasoning provider timed out.",
+        ReasoningProviderFailureCode.InvalidStructuredOutput => "The reasoning provider returned invalid structured output.",
+        ReasoningProviderFailureCode.TransportFailure => "The reasoning provider request failed.",
+        ReasoningProviderFailureCode.NoValidResult => "The reasoning provider returned no valid result.",
+        _ => "The reasoning provider failed."
+    };
 }

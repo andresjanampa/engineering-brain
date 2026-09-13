@@ -289,10 +289,15 @@ internal static class BrainCli
             };
             var interpretationEffort = providerOptions.GetReasoningEffort(ReasoningStage.InitiativeUnderstanding);
             var analysisEffort = providerOptions.GetReasoningEffort(ReasoningStage.ArchitectureAnalysis);
-            var preview = await new RemoteContextPreviewService().CreateAsync(
+            var secretValues = new EnvironmentOutboundSecretValueSource();
+            var outboundGuard = new OutboundContextGuard(secretValues);
+            var outboundEvaluator = new OutboundPolicyEvaluator();
+            var outboundGate = new OutboundRequestGate(outboundGuard, outboundEvaluator);
+            var preparation = await new RemoteContextPreviewService(gate: outboundGate).PrepareAsync(
                 options.InitiativePath, initiative, memory, reviewedConcepts,
                 options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, cancellation.Token);
+            var preview = preparation.Preview;
             WritePreview(preview);
             if (options.Preview)
             {
@@ -307,7 +312,7 @@ internal static class BrainCli
             IReasoningProvider provider = new OpenAIReasoningProvider(
                 apiKey,
                 providerOptions);
-            var service = new InitiativeAnalysisService(provider);
+            var service = new InitiativeAnalysisService(provider, outboundGate: outboundGate);
             var result = await service.AnalyzeAsync(
                 new InitiativeAnalysisRequest(
                     options.InitiativePath,
@@ -316,6 +321,7 @@ internal static class BrainCli
                     options.InterpretationModel,
                     options.ReasoningModel),
                 reviewedConcepts,
+                preparation.ApprovedCall1,
                 cancellation.Token);
             WriteAnalysis(result);
             return 0;
@@ -584,7 +590,10 @@ internal static class BrainCli
             IReasoningProvider Factory(LiveEvaluationCase item, int runNumber) => options.FakeProvider
                 ? new FakeLiveReasoningProvider(item, memory.SourceSnapshot, runNumber, interpretationEffort, analysisEffort)
                 : new OpenAIReasoningProvider(apiKey!, providerOptions);
-            var result = await new LiveEvaluationService().RunAsync(
+            var outboundGate = new OutboundRequestGate(
+                new OutboundContextGuard(new EnvironmentOutboundSecretValueSource()),
+                new OutboundPolicyEvaluator());
+            var result = await new LiveEvaluationService(gate: outboundGate).RunAsync(
                 plan, suitePath, memory, reviewedConcepts, providerName, Factory,
                 options.InterpretationModel, options.ReasoningModel,
                 interpretationEffort, analysisEffort, pricing, cancellation.Token);
@@ -768,6 +777,8 @@ internal static class BrainCli
         Console.WriteLine($"Estimated input tokens: {preview.Call2.EstimatedTokens}");
 
         WriteSection("Security");
+        WriteOutboundAssessment("CALL #1 exact", preview.Call1PolicyAssessment);
+        WriteOutboundAssessment("CALL #2 projection", preview.Call2PolicyAssessment);
         Console.WriteLine($"Source bodies: {preview.Security.SourceBodyFindings}");
         Console.WriteLine($"Absolute paths: {preview.Security.AbsolutePathFindings}");
         Console.WriteLine($"Secrets detected: {preview.Security.SecretFindings}");
@@ -824,7 +835,7 @@ internal static class BrainCli
         Console.WriteLine($"Usage calls/attempts/input/cached/output: {aggregate.Usage.LogicalCalls}/{aggregate.Usage.ProviderAttempts}/{aggregate.Usage.ActualInputTokens}/{aggregate.Usage.CachedInputTokens}/{aggregate.Usage.ActualOutputTokens}");
         Console.WriteLine($"Duration: {aggregate.Usage.DurationMilliseconds} ms; retries: {aggregate.Usage.Retries}; cost USD: {(aggregate.Usage.EstimatedCostUsd?.ToString("F6") ?? "n/a")}");
         Console.WriteLine($"Consistency status/decision/entity/capability/evidence: {result.Consistency.StatusAgreement:F3}/{result.Consistency.DecisionAgreement:F3}/{result.Consistency.EntityReferenceOverlap:F3}/{result.Consistency.CapabilityOverlap:F3}/{result.Consistency.EvidenceValidityAgreement:F3}");
-        Console.WriteLine($"Outbound source/secrets/absolute/raw snapshot: {aggregate.SourceBodyOutbound}/{aggregate.SecretOutbound}/{aggregate.AbsolutePathOutbound}/{aggregate.RawSnapshotOutbound}");
+        Console.WriteLine($"Outbound complete repository/source/secrets/absolute/raw snapshot: {aggregate.CompleteRepositoryOutbound}/{aggregate.SourceBodyOutbound}/{aggregate.SecretOutbound}/{aggregate.AbsolutePathOutbound}/{aggregate.RawSnapshotOutbound}");
         WriteSection("Artifacts");
         Console.WriteLine($"Summary: {result.SummaryPath}");
         Console.WriteLine($"Review: {result.ReviewPath}");
@@ -911,6 +922,16 @@ internal static class BrainCli
             Console.WriteLine($"- {candidate.FullName} | score {candidate.Score} | {reasons}");
         }
 
+        WriteSection("Outbound Security");
+        if (result.OutboundPolicyAssessments.Count > 0)
+        {
+            WriteOutboundAssessment("CALL #1 exact", result.OutboundPolicyAssessments[0]);
+        }
+        if (result.OutboundPolicyAssessments.Count > 1)
+        {
+            WriteOutboundAssessment("CALL #2 exact", result.OutboundPolicyAssessments[1]);
+        }
+
         WriteSection("Recommendations");
         foreach (var governed in result.Recommendations)
         {
@@ -970,6 +991,15 @@ internal static class BrainCli
     }
 
     private static string FormatUsage(int? tokens) => tokens?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unavailable";
+
+    private static void WriteOutboundAssessment(string label, OutboundPolicyAssessment assessment)
+    {
+        Console.WriteLine(label);
+        foreach (var line in OutboundPolicyDiagnosticFormatter.Format(assessment))
+        {
+            Console.WriteLine($"- {line}");
+        }
+    }
 
     private static void WriteValues(string label, IReadOnlyList<string> values)
     {

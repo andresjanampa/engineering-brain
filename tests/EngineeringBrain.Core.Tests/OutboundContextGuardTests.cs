@@ -45,7 +45,7 @@ public sealed class OutboundContextGuardTests
     [Fact]
     public void InitiativeAbsolutePathAndSourceBodyAreRejected()
     {
-        var result = _guard.ValidateInitiative("Inspect C:\\Users\\name\\repo and public class Leaked {");
+        var result = _guard.ValidateInitiative("Inspect C:\\Users\\name\\repo and public class Leaked { int Value; }");
         Assert.Equal(1, result.AbsolutePathFindings);
         Assert.Equal(1, result.SourceBodyFindings);
     }
@@ -58,9 +58,819 @@ public sealed class OutboundContextGuardTests
         Assert.Equal(1, _guard.Validate(context).SourceBodyFindings);
     }
 
-    private static InitiativeContext Context(ContextSegmentKind kind, string content)
+    [Fact]
+    public void Inspect_CompleteRepositorySegmentIsBlocked()
+    {
+        var context = Context(ContextSegmentKind.CompleteRepository, "repository payload");
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.CompleteRepository);
+    }
+
+    [Fact]
+    public void Inspect_RepositoryFilesEnvelopeIsBlocked()
+    {
+        const string payload = """
+            {"repository":{"name":"sample"},"files":[{"path":"src/A.cs","content":"content"}]}
+            """;
+
+        AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+    }
+
+    [Fact]
+    public void Inspect_RepositoryFilesEnvelopeInsideAllowedProjectNoteIsBlockedWithoutRetention()
+    {
+        const string prohibitedValue = "repository-source-must-not-be-retained";
+        const string payload = """
+            {"repository":{"name":"sample"},"files":[{"path":"src/A.cs","content":"repository-source-must-not-be-retained"}]}
+            """;
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        var findings = _guard.Inspect(Request(context.Content), context);
+
+        AssertFinding(findings, PolicyContentScope.CompleteRepository);
+        Assert.DoesNotContain(prohibitedValue, string.Join('\n', findings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_BoundedProjectMemoryAndGraphFactsAreAllowed()
+    {
+        var context = Context(
+            ContextSegmentKind.GraphEvidence,
+            "Project: EngineeringBrain.Core\nEntity: RepositorySnapshot\nRelation: Implements");
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Fact]
+    public void Inspect_CompleteRawSnapshotObjectIsBlocked()
+    {
+        const string payload = """
+            {"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}
+            """;
+
+        AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_RawSnapshotInsideAllowedGraphEvidenceIsBlockedWithoutRetention()
+    {
+        const string prohibitedValue = "snapshot-value-must-not-be-retained";
+        const string payload = """
+            {"schemaVersion":3,"repository":{"name":"snapshot-value-must-not-be-retained"},"git":{},"projects":[],"entities":[],"relations":[]}
+            """;
+        var context = Context(ContextSegmentKind.GraphEvidence, payload);
+
+        var findings = _guard.Inspect(Request(context.Content), context);
+
+        AssertFinding(findings, PolicyContentScope.RawSnapshot);
+        Assert.DoesNotContain(prohibitedValue, string.Join('\n', findings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ProsePrefixedRawSnapshotInsideProjectNoteIsBlocked()
+    {
+        const string payload = """
+            Evidence:
+            {"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}
+            """;
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_NestedRawSnapshotInsideGraphEvidenceIsBlocked()
+    {
+        const string payload = """
+            {"payload":{"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}}
+            """;
+        var context = Context(ContextSegmentKind.GraphEvidence, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_NestedRepositoryEnvelopeInsideProjectNoteIsBlocked()
+    {
+        const string payload = """
+            {"evidence":{"repository":{"name":"sample"},"files":[{"path":"src/A.cs","content":"content"}]}}
+            """;
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.CompleteRepository);
+    }
+
+    [Theory]
+    [InlineData(
+        "```json\n{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}\n```",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "```json\n{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}\n```",
+        PolicyContentScope.CompleteRepository)]
+    public void Inspect_FencedProhibitedJsonInsideAllowedSegmentIsBlocked(
+        string payload,
+        PolicyContentScope expectedCategory)
+    {
+        var context = Context(ContextSegmentKind.ComponentNote, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), expectedCategory);
+    }
+
+    [Fact]
+    public void Inspect_MultipleHarmlessOuterObjectsCannotHideRawSnapshot()
+    {
+        const string payload = """
+            {"outer":{"middle":{"inner":{"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}}}}
+            """;
+        var context = Context(ContextSegmentKind.RootIndex, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_ProhibitedObjectInOneOfMultipleAllowedSegmentsIsBlocked()
+    {
+        var segments = new[]
+        {
+            new ContextSegment(ContextSegmentKind.ProjectNote, "Project: EngineeringBrain.Core", 1, "test", 1, true),
+            new ContextSegment(
+                ContextSegmentKind.GraphEvidence,
+                "Evidence: {\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}",
+                1,
+                "test",
+                1,
+                true)
+        };
+        var content = ContextSegmentRenderer.Render(segments);
+        var context = new InitiativeContext(content, 1, [], [], segments);
+
+        AssertFinding(_guard.Inspect(Request(content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Theory]
+    [InlineData(ContextSegmentKind.ProjectNote)]
+    [InlineData(ContextSegmentKind.GraphEvidence)]
+    public void Inspect_BoundedDerivedJsonInsideAllowedSegmentIsAllowed(ContextSegmentKind kind)
+    {
+        const string payload = """
+            {"repository":"engineering-brain","entities":[{"id":"entity:1"}],"relations":[]}
+            """;
+        var context = Context(kind, payload);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Theory]
+    [InlineData("{\"metadata\":{\"repository\":\"engineering-brain\",\"counts\":{\"projects\":6,\"entities\":433}}}")]
+    [InlineData("{\"projectCount\":6,\"entityCount\":433,\"relationCount\":451}")]
+    [InlineData("Prose with {braces} that is not JSON.")]
+    [InlineData("Evidence: { malformed ordinary prose")]
+    public void Inspect_HarmlessNestedOrMalformedJsonLikeContentIsAllowed(string payload)
+    {
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Theory]
+    [InlineData(
+        "{payload:{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "{payload:{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}}",
+        PolicyContentScope.CompleteRepository)]
+    [InlineData(
+        "Evidence: {payload:{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "```json\n{payload:{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}}\n```",
+        PolicyContentScope.CompleteRepository)]
+    [InlineData(
+        "{\"outer\":{payload:{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}}",
+        PolicyContentScope.RawSnapshot)]
+    public void Inspect_MalformedBalancedWrapperCannotHideProhibitedNestedJson(
+        string payload,
+        PolicyContentScope expectedCategory)
+    {
+        AssertFinding(_guard.Inspect(Request(payload)), expectedCategory);
+    }
+
+    [Theory]
+    [InlineData(
+        "{payload:invalid} later {\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "{payload:invalid} later {\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}",
+        PolicyContentScope.CompleteRepository)]
+    public void Inspect_MalformedJsonBeforeIndependentProhibitedCandidateIsBlocked(
+        string payload,
+        PolicyContentScope expectedCategory)
+    {
+        AssertFinding(_guard.Inspect(Request(payload)), expectedCategory);
+    }
+
+    [Theory]
+    [InlineData("{payload:invalid}")]
+    [InlineData("Prose {with {many} balanced} braces")]
+    [InlineData("{\"metadata\":{\"repository\":\"engineering-brain\",\"counts\":{\"projects\":6}}}")]
+    [InlineData("{payload:{\"metadata\":true}}")]
+    public void Inspect_MalformedOrHarmlessNestedJsonWithoutProhibitedShapeIsAllowed(string payload)
+    {
+        Assert.Empty(_guard.Inspect(Request(payload)));
+    }
+
+    [Fact]
+    public void Inspect_JsonStringBracesCannotHideProhibitedNestedJson()
+    {
+        const string payload =
+            "{\"text\":\"escaped quote: \\\" and braces { }\",\"payload\":{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}}";
+
+        AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveJsonNestingFailsClosedWithoutRetention()
+    {
+        var payload = string.Concat(Enumerable.Repeat("{\"value\":", 65))
+            + "0"
+            + new string('}', 65);
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+        Assert.DoesNotContain(payload, finding.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveJsonCandidateCountFailsClosed()
+    {
+        var payload = string.Join('\n', Enumerable.Repeat("{\"metadata\":true}", 33));
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveJsonNodeCountFailsClosed()
+    {
+        var payload = "{\"items\":[" + string.Join(',', Enumerable.Repeat("{}", 10_001)) + "]}";
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_OversizedInputFailsClosed()
+    {
+        var payload = new string('x', 1_000_001);
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData(ContextSegmentKind.ProjectNote, "Project: EngineeringBrain.Core")]
+    [InlineData(ContextSegmentKind.GraphEvidence, "Entity: RepositoryScanner")]
+    public void Inspect_OrdinaryAllowedSegmentContentIsAllowed(ContextSegmentKind kind, string content)
+    {
+        var context = Context(kind, content);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Fact]
+    public void Inspect_MultipleStructuredSegmentViolationsAreOrderedAndBounded()
+    {
+        var segments = new[]
+        {
+            new ContextSegment(
+                ContextSegmentKind.ProjectNote,
+                "{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}",
+                1,
+                "test",
+                1,
+                true),
+            new ContextSegment(
+                ContextSegmentKind.GraphEvidence,
+                "{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}",
+                1,
+                "test",
+                1,
+                true),
+            new ContextSegment(
+                ContextSegmentKind.ComponentNote,
+                "api_key=fake-secret-value",
+                1,
+                "test",
+                1,
+                true)
+        };
+        var content = ContextSegmentRenderer.Render(segments);
+        var context = new InitiativeContext(content, 1, [], [], segments);
+
+        var findings = _guard.Inspect(Request(content), context);
+
+        Assert.Equal(
+            [PolicyContentScope.CompleteRepository, PolicyContentScope.RawSnapshot, PolicyContentScope.Secrets],
+            findings.Select(finding => finding.Category));
+        Assert.All(findings, finding => Assert.InRange(finding.FindingCount, 1, 99));
+    }
+
+    [Theory]
+    [InlineData(ContextSegmentKind.ProjectNote, "public class Leaked { int Value; }", PolicyContentScope.SourceBodies)]
+    [InlineData(ContextSegmentKind.GraphEvidence, "api_key=fake-secret-value", PolicyContentScope.Secrets)]
+    [InlineData(ContextSegmentKind.ComponentNote, "C:\\Users\\person\\private\\File.cs", PolicyContentScope.AbsoluteLocalPaths)]
+    public void Inspect_AllowedSegmentContentIsCheckedAcrossTextCategories(
+        ContextSegmentKind kind,
+        string content,
+        PolicyContentScope expectedCategory)
+    {
+        var context = Context(kind, content);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), expectedCategory);
+    }
+
+    [Fact]
+    public void Inspect_SelectedEntityRelationSummaryIsAllowed()
+    {
+        const string payload = "Entity: RepositoryScanner\nRelation: Implements ILanguageAnalyzer";
+
+        Assert.Empty(_guard.Inspect(Request(payload)));
+    }
+
+    [Fact]
+    public void Inspect_ExplicitSourceBodyIsBlocked()
+    {
+        var context = Context(ContextSegmentKind.SourceBody, "public void Run()\n{\n    return;\n}");
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("class Customer\n{\n    int Value;\n}")]
+    [InlineData("public class Customer\n{\n    int Value;\n}")]
+    [InlineData("void Save()\n{\n    return;\n}")]
+    [InlineData("public void Save()\n{\n    return;\n}")]
+    [InlineData("private void Save()\n{\n    return;\n}")]
+    [InlineData("class Customer {\n    int Value;\n}")]
+    [InlineData("void Save() {\n    return;\n}")]
+    public void Inspect_CompleteCFamilyBodyIsBlocked(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("public/*gap*/class Customer\n{\n    int Value;\n}")]
+    [InlineData("class/*gap*/Customer\n{\n    int Value;\n}")]
+    [InlineData("public class/*gap*/Customer\n{\n    int Value;\n}")]
+    [InlineData("public/*gap*/void Save()\n{\n    return;\n}")]
+    [InlineData("public/* gap\n*/class Customer\n{\n    int Value;\n}")]
+    public void Inspect_BlockCommentsPreserveDeclarationTokenSeparation(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("public void Save(\n    string value)\n{\n    return;\n}")]
+    [InlineData("public Task<T> SaveAsync<T>(\n    T value)\n{\n    return Task.FromResult(value);\n}")]
+    [InlineData("public T Save<T>(\n    T value)\n    where T : class\n{\n    return value;\n}")]
+    [InlineData("public Customer(\n    string name)\n{\n    Initialize();\n}")]
+    [InlineData("public Customer(\n    string name)\n    : base(name)\n{\n    Initialize();\n}")]
+    [InlineData("public Customer(\n    string name)\n    : this()\n{\n    Initialize();\n}")]
+    public void Inspect_MultilineCFamilyDeclarationWithBodyIsBlocked(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("public void Save(string value = \"{\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"}\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \";\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"(\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \")\")\n{\n    return;\n}")]
+    [InlineData("public void Save(char value = '{')\n{\n    return;\n}")]
+    [InlineData("public void Save(char value = ';')\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"\\\"{;()\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"// not comment\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"/* not comment */\")\n{\n    return;\n}")]
+    public void Inspect_QuotedCFamilyStructuralDelimitersCannotHideBody(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("public void Save(string value = \"=>\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"\\\"=>\\\"\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = @\"=>\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"\"\"=>\"\"\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"{=>;}()\")\n{\n    return;\n}")]
+    public void Inspect_QuotedCFamilyExpressionArrowsCannotHideBody(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [MemberData(nameof(CompleteMultilineLiteralBodies))]
+    public void Inspect_CompleteMultilineLiteralBodiesAreBlocked(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    public static TheoryData<string> CompleteMultilineLiteralBodies => new()
+    {
+        Lines(
+            "public void Save(string value = @\"first line",
+            "=> second line\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first line",
+            "{ ; ( ) } => // not comment",
+            "second line\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first line",
+            "=> second line",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first line",
+            "{ ; ( ) } =>",
+            "// still literal",
+            "second line",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first \"\"quoted\"\"",
+            "{ ; ( ) } =>",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first",
+            "// not comment",
+            "/* not block comment */",
+            "{ ; ( ) } =>",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "\"quoted\"",
+            "{ ; ( ) } =>",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "// not comment",
+            "/* not block comment */",
+            "{ ; ( ) } =>",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first",
+            "{",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first",
+            ";",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @\"first",
+            "( )",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"",
+            "first",
+            "=>",
+            "second",
+            "\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = \"\"\"\"",
+            "ordinary \"\"\" quotes and { ; ( ) } =>",
+            "\"\"\"\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @$\"first",
+            "{ ; ( ) } =>",
+            "second\")",
+            "{",
+            "    return;",
+            "}"),
+        Lines(
+            "public void Save(string value = @$\"first" + '\\' + "\")",
+            "{",
+            "    return;",
+            "}")
+    };
+
+    [Fact]
+    public void Inspect_WhitespaceAndCommentsBetweenDeclarationAndBraceCannotHideBody()
+    {
+        var padding = string.Join('\n', Enumerable.Repeat("// harmless padding", 65));
+        var sourceBody = $"class Customer\n{padding}\n{{\n    int Value;\n}}";
+
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Fact]
+    public void Inspect_WhitespaceAndCommentsBetweenBraceAndBodyCannotHideBody()
+    {
+        var padding = string.Join('\n', Enumerable.Repeat("/* harmless padding */", 65));
+        var sourceBody = $"class Customer\n{{\n{padding}\n    int Value;\n}}";
+
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
+    [Theory]
+    [InlineData("public class Customer {")]
+    [InlineData("class Customer")]
+    [InlineData("void Save();")]
+    [InlineData("void Save()")]
+    [InlineData("public interface ICustomer\n{\n    void Save();\n}")]
+    [InlineData("CustomerService")]
+    [InlineData("src/Customer.cs")]
+    public void Inspect_IncompleteCFamilyDeclarationOrSafeReferenceIsAllowed(string content)
+    {
+        Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Theory]
+    [InlineData("public void Save(\n    string value);")]
+    [InlineData("public Task<T> SaveAsync<T>(\n    T value)\n    where T : class;")]
+    [InlineData("public Customer(\n    string name)")]
+    [InlineData("public Customer(\n    string name)\n    : base(name);")]
+    [InlineData("class Customer\n{\n    // comment only\n}")]
+    [InlineData("class Customer\n{\n    /* comment only */\n}")]
+    [InlineData("Call Process(input) when the initiative is ready.")]
+    public void Inspect_MultilineSignatureOrCommentOnlyBlockIsAllowed(string content)
+    {
+        Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Theory]
+    [InlineData("public void Save(string value = \"{\");")]
+    [InlineData("public void Save(string value = \"}\");")]
+    [InlineData("public void Save(string value = \";\");")]
+    [InlineData("public void Save(string value = \"(\");")]
+    [InlineData("public void Save(string value = \")\");")]
+    [InlineData("public void Save(char value = '{');")]
+    [InlineData("public void Save(char value = ';');")]
+    [InlineData("public void Save(string value = \"\\\"{;()\");")]
+    [InlineData("public void Save(string value = \"// not comment\");")]
+    [InlineData("public void Save(string value = \"/* not comment */\");")]
+    [InlineData("class Customer\n{\n    // { } ; ( ) \\\"\n}")]
+    [InlineData("class Customer\n{\n    /* { } ; ( ) \\\" */\n}")]
+    public void Inspect_QuotedCFamilyStructuralDelimiterSignaturesWithoutBodiesAreAllowed(string signature)
+    {
+        Assert.Empty(_guard.Inspect(Request(signature)));
+    }
+
+    [Theory]
+    [InlineData("public void Save(string value = \"=>\");")]
+    [InlineData("public void Save(string value = \"\\\"=>\\\"\");")]
+    [InlineData("public void Save(string value = @\"=>\");")]
+    [InlineData("public void Save(string value = \"\"\"=>\"\"\");")]
+    [InlineData("public string Name => value;")]
+    public void Inspect_QuotedArrowSignaturesAndExpressionBodiedMembersRemainAllowed(string content)
+    {
+        Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Theory]
+    [MemberData(nameof(MultilineLiteralSignatures))]
+    public void Inspect_MultilineLiteralSignaturesWithoutBodiesAreAllowed(string signature)
+    {
+        Assert.Empty(_guard.Inspect(Request(signature)));
+    }
+
+    public static TheoryData<string> MultilineLiteralSignatures => new()
+    {
+        Lines("public void Save(string value = @\"first", "=> second\");"),
+        Lines("public void Save(string value = \"\"\"", "first", "=> second", "\"\"\");"),
+        Lines("public void Save(string value = @\"first", "{ ; ( ) } =>", "second\");"),
+        Lines("public void Save(string value = \"\"\"", "first", "{ ; ( ) } =>", "second", "\"\"\");"),
+        Lines("public void Save(string value = @\"first \"\"quoted\"\"", "=> second\");"),
+        Lines("public void Save(string value = \"\"\"", "\"quoted\"", "=> second", "\"\"\");"),
+        Lines("public void Save(string value = \"\"\"\"", "ordinary \"\"\" quotes and { ; ( ) } =>", "\"\"\"\");"),
+        Lines("public void Save(string value = @$\"first", "{ ; ( ) } =>", "second\");"),
+        Lines("public void Save(string value = @$\"first" + '\\' + "\");")
+    };
+
+    [Theory]
+    [InlineData("public void Save(string value = @\"first\nsecond")]
+    [InlineData("public void Save(string value = \"\"\"\nfirst\nsecond")]
+    [InlineData("public void Save(string value = \"\"\"\"\nfirst\n\"\"\"")]
+    [InlineData("public void Save(string value = \"unfinished")]
+    [InlineData("public void Save(char value = 'x")]
+    [InlineData("public void Save(string value) /* unfinished")]
+    public void Inspect_UnterminatedLexicalConstructInPlausibleDeclarationFailsClosed(string content)
+    {
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData("@\"unfinished prose\npublic void Save()\n{\n    return;\n}")]
+    [InlineData("\"\"\"\nunfinished prose\npublic void Save()\n{\n    return;\n}")]
+    public void Inspect_UnfinishedProseLiteralCannotHideLaterBody(string content)
+    {
+        AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.SourceBodies);
+    }
+
+    [Fact]
+    public void Inspect_NonMatchingRawStringClosingDelimiterFailsClosed()
+    {
+        const string content = "public void Save(string value = \"\"\"\nfirst\n\"\"\"\")";
+
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveCFamilyHeaderInsideMultilineLiteralFailsClosed()
+    {
+        var content = Lines("public void Save(string value = @\"first", new string('x', 16_385));
+
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveCFamilyHeaderFailsClosed()
+    {
+        var content = "public void Save(" + new string('x', 16_385);
+
+        var finding = AssertFinding(_guard.Inspect(Request(content)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_DetectedCFamilyBodyIsNotRetained()
+    {
+        const string sourceBody = "class SensitiveImplementation\n{\n    string Value = \"do-not-retain\";\n}";
+
+        var findings = _guard.Inspect(Request(sourceBody));
+
+        AssertFinding(findings, PolicyContentScope.SourceBodies);
+        Assert.DoesNotContain(sourceBody, string.Join('\n', findings), StringComparison.Ordinal);
+        Assert.DoesNotContain("do-not-retain", string.Join('\n', findings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_SignatureAndRelativeReferenceAreAllowed()
+    {
+        var context = Context(
+            ContextSegmentKind.GraphEvidence,
+            "Signature: ProcessAsync(string input)\nSource: src/Core/File.cs:12",
+            ["src/Core/File.cs"]);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Fact]
+    public void Inspect_KnownSecretValueInSystemInstructionsIsBlockedWithoutRetention()
+    {
+        const string secret = "test-secret-value-123";
+        var guard = new OutboundContextGuard(new FixedSecretValueSource(secret));
+
+        var finding = AssertFinding(
+            guard.Inspect(Request("safe user", $"Never expose {secret}")),
+            PolicyContentScope.Secrets);
+
+        Assert.Equal(OutboundInspectionReasonCode.KnownSecretValue, finding.ReasonCode);
+        Assert.DoesNotContain(secret, finding.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_HighConfidenceSecretSyntaxIsBlocked()
+    {
+        AssertFinding(
+            _guard.Inspect(Request("api_key=fake-secret-value")),
+            PolicyContentScope.Secrets);
+    }
+
+    [Fact]
+    public void Inspect_CommonNonSecretTextIsAllowed()
+    {
+        Assert.Empty(_guard.Inspect(Request("Use a tokenizer in the development environment.")));
+    }
+
+    [Theory]
+    [InlineData("C:\\Users\\person\\repo\\File.cs")]
+    [InlineData("\\\\server\\share\\repo\\File.cs")]
+    [InlineData("/home/person/repo/File.cs")]
+    [InlineData("file:///C:/repo/File.cs")]
+    public void Inspect_AbsoluteMachinePathIsBlocked(string value)
+    {
+        AssertFinding(_guard.Inspect(Request(value)), PolicyContentScope.AbsoluteLocalPaths);
+    }
+
+    [Fact]
+    public void Inspect_RelativeRepositoryPathIsAllowed()
+    {
+        Assert.Empty(_guard.Inspect(Request("src/Core/File.cs:12")));
+    }
+
+    [Fact]
+    public void Inspect_TraversalSourceReferenceIsBlocked()
+    {
+        var context = Context(ContextSegmentKind.GraphEvidence, "selected evidence", ["../outside/File.cs"]);
+
+        var finding = AssertFinding(
+            _guard.Inspect(Request(context.Content), context),
+            PolicyContentScope.AbsoluteLocalPaths);
+        Assert.Equal(OutboundInspectionReasonCode.InvalidSourceReference, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_ContextContentMismatchFailsClosed()
+    {
+        var segment = new ContextSegment(ContextSegmentKind.GraphEvidence, "represented", 1, "test", 1, true);
+        var context = new InitiativeContext("different", 1, [], [], [segment]);
+
+        var finding = AssertFinding(
+            _guard.Inspect(Request("different"), context),
+            PolicyContentScope.SourceBodies);
+        Assert.Equal(OutboundInspectionReasonCode.ContextRepresentationMismatch, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_DuplicateMatchesAreAggregatedAndCapped()
+    {
+        var payload = string.Join(' ', Enumerable.Repeat("api_key=fake-secret-value", 120));
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.Secrets);
+
+        Assert.Equal(99, finding.FindingCount);
+        Assert.True(finding.FindingCountCapped);
+    }
+
+    private static InitiativeContext Context(
+        ContextSegmentKind kind,
+        string content,
+        IReadOnlyList<string>? includedNotePaths = null)
     {
         var segments = new[] { new ContextSegment(kind, content, 1, "test", 1, true) };
-        return new InitiativeContext(ContextSegmentRenderer.Render(segments), 1, [], [], segments);
+        return new InitiativeContext(ContextSegmentRenderer.Render(segments), 1, includedNotePaths ?? [], [], segments);
+    }
+
+    private static ReasoningRequest Request(string userData, string systemInstructions = "fixed system") => new(
+        ReasoningStage.ArchitectureAnalysis,
+        "test-model",
+        systemInstructions,
+        userData,
+        500,
+        100);
+
+    private static string Lines(params string[] lines) => string.Join('\n', lines);
+
+    private static OutboundInspectionFinding AssertFinding(
+        IReadOnlyList<OutboundInspectionFinding> findings,
+        PolicyContentScope category) => Assert.Single(findings, finding => finding.Category == category);
+
+    private sealed class FixedSecretValueSource(params string[] values) : IOutboundSecretValueSource
+    {
+        public IReadOnlySet<string> GetValues() => new HashSet<string>(values, StringComparer.Ordinal);
     }
 }

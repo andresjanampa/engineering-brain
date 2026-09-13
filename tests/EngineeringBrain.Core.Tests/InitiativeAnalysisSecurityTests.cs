@@ -7,6 +7,24 @@ namespace EngineeringBrain.Core.Tests;
 public sealed class InitiativeAnalysisSecurityTests
 {
     [Fact]
+    public void PreviewOutput_LabelsCallTwoProjected()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "EngineeringBrain.Cli", "Program.cs"));
+
+        Assert.Contains("WriteOutboundAssessment(\"CALL #1 exact\", preview.Call1PolicyAssessment)", source, StringComparison.Ordinal);
+        Assert.Contains("WriteOutboundAssessment(\"CALL #2 projection\", preview.Call2PolicyAssessment)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnalyzeOutput_LabelsBothActualCallsExact()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "EngineeringBrain.Cli", "Program.cs"));
+
+        Assert.Contains("WriteOutboundAssessment(\"CALL #1 exact\", result.OutboundPolicyAssessments[0])", source, StringComparison.Ordinal);
+        Assert.Contains("WriteOutboundAssessment(\"CALL #2 exact\", result.OutboundPolicyAssessments[1])", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RemoteAuthorization_RequiresExplicitOptInBeforeReadingCredential()
     {
         var read = false;
@@ -105,6 +123,30 @@ public sealed class InitiativeAnalysisSecurityTests
     }
 
     [Fact]
+    public async Task FailedInitiativeAnalysis_DoesNotPersistAnAnalysisArtifact()
+    {
+        using var fixture = new InitiativeMemoryFixture();
+        var memory = await fixture.CreateMemoryAsync();
+        var store = new LocalInitiativeAnalysisStore(fixture.Root);
+        var service = new InitiativeAnalysisService(new UnsafeThrowingProvider(), store: store);
+
+        var exception = await Assert.ThrowsAsync<ReasoningProviderException>(() => service.AnalyzeAsync(
+            new InitiativeAnalysisRequest(
+                "initiative.md",
+                "Add business capability.",
+                memory,
+                "model-a",
+                "model-b",
+                PersistResult: true)));
+
+        Assert.Equal(ReasoningProviderFailureCode.TransportFailure, exception.FailureCode);
+        Assert.DoesNotContain("fixture-provider-secret", exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            Directory.GetFiles(fixture.Root, "*.json", SearchOption.AllDirectories),
+            path => path.Contains($"{Path.DirectorySeparatorChar}analyses{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void StructuredSchemasAreStrictAndContainNoProviderCredentialField()
     {
         var json = ReasoningJsonSchema.For<InitiativeAnalysis>().ToString();
@@ -128,4 +170,30 @@ public sealed class InitiativeAnalysisSecurityTests
             ? InitiativeAnalysisTestData.Understanding("business")
             : InitiativeAnalysisTestData.Analysis(
                 InitiativeAnalysisTestData.Recommendation(RecommendationDecision.Create, [])));
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "EngineeringBrain.sln")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("EngineeringBrain.sln was not found.");
+    }
+
+    private sealed class UnsafeThrowingProvider : IReasoningProvider
+    {
+        public string Name => "Unsafe";
+
+        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
+            ApprovedReasoningRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("fixture-provider-secret");
+    }
 }

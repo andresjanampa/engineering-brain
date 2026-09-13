@@ -21,11 +21,12 @@ public sealed record PersistedInitiativeAnalysis(
     InitiativeAnalysis Analysis,
     IReadOnlyList<GovernedRecommendation> Recommendations,
     PolicyOutcome PolicyOutcome,
-    InitiativeAnalysisUsage Usage);
+    InitiativeAnalysisUsage Usage,
+    IReadOnlyList<OutboundPolicyAssessment>? OutboundPolicyAssessments = null);
 
 public sealed class LocalInitiativeAnalysisStore
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = CreateOptions();
     private readonly string _dataRoot;
@@ -71,7 +72,8 @@ public sealed class LocalInitiativeAnalysisStore
             result.Analysis,
             result.Recommendations,
             result.PolicyOutcome,
-            result.Usage);
+            result.Usage,
+            result.OutboundPolicyAssessments);
         var json = JsonSerializer.Serialize(stored, JsonOptions).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
         var temporary = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
         try
@@ -103,14 +105,18 @@ public sealed class LocalInitiativeAnalysisStore
             throw new InvalidDataException("Initiative analysis does not declare a valid schemaVersion.");
         }
 
-        if (version != CurrentSchemaVersion)
+        if (version is not 2 and not CurrentSchemaVersion)
         {
             throw new InvalidDataException(
-                $"Initiative analysis schema {version} is unsupported; expected {CurrentSchemaVersion}. Historical analyses are not rewritten automatically.");
+                $"Initiative analysis schema {version} is unsupported; expected 2 or {CurrentSchemaVersion}. Historical analyses are not rewritten automatically.");
         }
 
-        return JsonSerializer.Deserialize<PersistedInitiativeAnalysis>(json, JsonOptions)
+        var persisted = JsonSerializer.Deserialize<PersistedInitiativeAnalysis>(json, JsonOptions)
             ?? throw new InvalidDataException("Initiative analysis JSON could not be deserialized.");
+        return persisted with
+        {
+            OutboundPolicyAssessments = persisted.OutboundPolicyAssessments ?? [OutboundPolicyAssessment.NotRecorded]
+        };
     }
 
     private static string Hash(string value) => Convert.ToHexString(

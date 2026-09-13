@@ -99,10 +99,11 @@ public sealed class InitiativeAnalysisDogfoodTests
         public List<ReasoningRequest> Requests { get; } = [];
 
         public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
-            ReasoningRequest request,
+            ApprovedReasoningRequest request,
             CancellationToken cancellationToken = default)
         {
-            Requests.Add(request);
+            var raw = request.Request;
+            Requests.Add(raw);
             object value = typeof(T) == typeof(InitiativeUnderstanding)
                 ? new InitiativeUnderstanding(
                     "Add support for analyzing Python projects through the existing extensibility model.",
@@ -115,11 +116,11 @@ public sealed class InitiativeAnalysisDogfoodTests
                     ["python", "language analyzer", "extension"],
                     ["preserve existing extensibility"],
                     ["Python analysis depth is unspecified."])
-                : CreateAnalysis(request.UserData);
+                : CreateAnalysis(raw.UserData);
             return Task.FromResult(new ReasoningResult<T>(
                 (T)value,
-                new ReasoningCallUsage(request.Stage, Name, request.Model, request.EstimatedInputTokens,
-                    request.EstimatedInputTokens, 0, 20, 1, 0)));
+                new ReasoningCallUsage(raw.Stage, Name, raw.Model, raw.EstimatedInputTokens,
+                    raw.EstimatedInputTokens, 0, 20, 1, 0)));
         }
 
         private InitiativeAnalysis CreateAnalysis(string context)
