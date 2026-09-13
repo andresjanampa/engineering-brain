@@ -13,6 +13,7 @@ public sealed class LiveEvaluationService
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
     private readonly OutboundContextGuard _guard;
+    private readonly OutboundRequestGate _gate;
     private readonly LiveEvaluationMetricCalculator _metrics;
     private readonly LocalLiveEvaluationStore _store;
     private readonly Func<DateTimeOffset> _clock;
@@ -25,6 +26,7 @@ public sealed class LiveEvaluationService
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
         OutboundContextGuard? guard = null,
+        OutboundRequestGate? gate = null,
         LiveEvaluationMetricCalculator? metrics = null,
         LocalLiveEvaluationStore? store = null,
         Func<DateTimeOffset>? clock = null)
@@ -36,6 +38,7 @@ public sealed class LiveEvaluationService
         _validator = validator ?? new AnalysisEvidenceValidator();
         _policyValidator = policyValidator ?? new PolicyComplianceValidator();
         _guard = guard ?? new OutboundContextGuard();
+        _gate = gate ?? new OutboundRequestGate(_guard);
         _metrics = metrics ?? new LiveEvaluationMetricCalculator();
         _store = store ?? new LocalLiveEvaluationStore();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
@@ -204,13 +207,17 @@ public sealed class LiveEvaluationService
             if (call1Estimate > _budget.MaximumInitiativeInputTokens)
                 throw new InvalidDataException("Live initiative exceeds the configured input limit.");
             failedEstimate = call1Estimate;
-            var call1 = await InvokeAsync<InitiativeUnderstanding>(provider, new ReasoningRequest(
+            var call1Request = new ReasoningRequest(
                 ReasoningStage.InitiativeUnderstanding,
                 interpretationModel,
                 InitiativeAnalysisPrompts.Understanding,
                 initiative,
                 _budget.InitiativeOutputTokens,
-                call1Estimate), cancellationToken);
+                call1Estimate);
+            var call1 = await InvokeAsync<InitiativeUnderstanding>(
+                provider,
+                _gate.ApproveExact(call1Request),
+                cancellationToken);
             usage.Add(call1.Usage);
             understanding = call1.Value;
             understandingMetrics = _metrics.EvaluateUnderstanding(item, understanding, memory.SourceSnapshot);
@@ -246,13 +253,17 @@ public sealed class LiveEvaluationService
             if (call2Estimate > _budget.MaximumReasoningInputTokens)
                 throw new InvalidDataException("Live reasoning context exceeds the configured input limit.");
             failedEstimate = call2Estimate;
-            var call2 = await InvokeAsync<InitiativeAnalysis>(provider, new ReasoningRequest(
+            var call2Request = new ReasoningRequest(
                 ReasoningStage.ArchitectureAnalysis,
                 reasoningModel,
                 InitiativeAnalysisPrompts.ArchitectureAnalysis,
                 context.Content,
                 _budget.ReasoningOutputTokens,
-                call2Estimate), cancellationToken);
+                call2Estimate);
+            var call2 = await InvokeAsync<InitiativeAnalysis>(
+                provider,
+                _gate.ApproveExact(call2Request, context),
+                cancellationToken);
             usage.Add(call2.Usage);
             analysis = call2.Value;
             var validated = _validator.Validate(analysis, memory.SourceSnapshot);
@@ -321,7 +332,7 @@ public sealed class LiveEvaluationService
 
     private static async Task<ReasoningResult<T>> InvokeAsync<T>(
         IReasoningProvider provider,
-        ReasoningRequest request,
+        ApprovedReasoningRequest request,
         CancellationToken cancellationToken)
     {
         try
@@ -338,12 +349,12 @@ public sealed class LiveEvaluationService
         }
         catch (System.Text.Json.JsonException exception)
         {
-            throw new ReasoningProviderException(request.Stage, true, 0, 0,
+            throw new ReasoningProviderException(request.Request.Stage, true, 0, 0,
                 $"Structured output failed validation. {exception.Message}");
         }
         catch (Exception exception)
         {
-            throw new ReasoningProviderException(request.Stage, false, 0, 0,
+            throw new ReasoningProviderException(request.Request.Stage, false, 0, 0,
                 $"Provider execution failed. {exception.Message}");
         }
     }

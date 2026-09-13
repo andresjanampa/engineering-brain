@@ -16,20 +16,25 @@ internal sealed class FakeReasoningProvider : IReasoningProvider
 
     public List<ReasoningRequest> Requests { get; } = [];
 
+    public List<ApprovedReasoningRequest> ApprovedRequests { get; } = [];
+
     public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
-        ReasoningRequest request,
+        ApprovedReasoningRequest request,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Requests.Add(request);
+        request.EnsureIntegrity();
+        ApprovedRequests.Add(request);
+        var raw = request.Request;
+        Requests.Add(raw);
         return Task.FromResult(new ReasoningResult<T>(
-            (T)_response(request, typeof(T)),
+            (T)_response(raw, typeof(T)),
             new ReasoningCallUsage(
-                request.Stage,
+                raw.Stage,
                 Name,
-                request.Model,
-                request.EstimatedInputTokens,
-                request.EstimatedInputTokens - 1,
+                raw.Model,
+                raw.EstimatedInputTokens,
+                raw.EstimatedInputTokens - 1,
                 0,
                 42,
                 1,

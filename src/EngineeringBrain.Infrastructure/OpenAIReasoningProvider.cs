@@ -8,6 +8,15 @@ using OpenAI.Responses;
 
 namespace EngineeringBrain.Infrastructure;
 
+internal sealed record OpenAITransportPayload(
+    string Model,
+    int MaximumOutputTokens,
+    string SystemInstructions,
+    string UserData,
+    string ReasoningEffort,
+    string ResponseSchemaName,
+    BinaryData ResponseSchema);
+
 public sealed record OpenAIReasoningProviderOptions(
     TimeSpan Timeout,
     int MaximumRetries = 1,
@@ -71,10 +80,12 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
     public string Name => "OpenAI";
 
     public async Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
-        ReasoningRequest request,
+        ApprovedReasoningRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var payload = MapTransportPayload<T>(request);
+        var raw = request.Request;
         var stopwatch = Stopwatch.StartNew();
         var failure = "The provider did not return a result.";
         var structuredOutputFailure = false;
@@ -83,7 +94,6 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
         var cachedInputTokens = 0;
         var actualOutputTokens = 0;
         var reasoningTokens = 0;
-        var reasoningEffort = _options.GetReasoningEffort(request.Stage);
         for (var attempt = 0; attempt <= _options.MaximumRetries; attempt++)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -92,12 +102,12 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
             {
                 var options = new CreateResponseOptions
                 {
-                    Model = request.Model,
-                    MaxOutputTokenCount = request.MaximumOutputTokens,
+                    Model = payload.Model,
+                    MaxOutputTokenCount = payload.MaximumOutputTokens,
                     StoredOutputEnabled = false,
                     ReasoningOptions = new ResponseReasoningOptions
                     {
-                        ReasoningEffortLevel = reasoningEffort switch
+                        ReasoningEffortLevel = payload.ReasoningEffort switch
                         {
                             "low" => ResponseReasoningEffortLevel.Low,
                             "medium" => ResponseReasoningEffortLevel.Medium,
@@ -108,13 +118,13 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
                     TextOptions = new ResponseTextOptions
                     {
                         TextFormat = ResponseTextFormat.CreateJsonSchemaFormat(
-                            JsonNamingPolicy.SnakeCaseLower.ConvertName(typeof(T).Name),
-                            ReasoningJsonSchema.For<T>(),
+                            payload.ResponseSchemaName,
+                            payload.ResponseSchema,
                             jsonSchemaIsStrict: true)
                     }
                 };
-                options.InputItems.Add(ResponseItem.CreateSystemMessageItem(request.SystemInstructions));
-                options.InputItems.Add(ResponseItem.CreateUserMessageItem(request.UserData));
+                options.InputItems.Add(ResponseItem.CreateSystemMessageItem(payload.SystemInstructions));
+                options.InputItems.Add(ResponseItem.CreateUserMessageItem(payload.UserData));
                 ResponseResult response = await _client.CreateResponseAsync(options, timeout.Token);
                 if (response.Usage is not null)
                 {
@@ -130,16 +140,16 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
                 return new ReasoningResult<T>(
                     value,
                     new ReasoningCallUsage(
-                        request.Stage,
+                        raw.Stage,
                         Name,
-                        request.Model,
-                        request.EstimatedInputTokens,
+                        raw.Model,
+                        raw.EstimatedInputTokens,
                         hasReportedUsage ? actualInputTokens : null,
                         hasReportedUsage ? cachedInputTokens : null,
                         hasReportedUsage ? actualOutputTokens : null,
                         stopwatch.ElapsedMilliseconds,
                         attempt,
-                        reasoningEffort,
+                        payload.ReasoningEffort,
                         hasReportedUsage ? reasoningTokens : null));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -164,16 +174,32 @@ public sealed class OpenAIReasoningProvider : IReasoningProvider
         }
 
         throw new ReasoningProviderException(
-            request.Stage,
+            raw.Stage,
             structuredOutputFailure,
             stopwatch.ElapsedMilliseconds,
             _options.MaximumRetries,
-            $"OpenAI returned no valid structured result during {request.Stage} after {_options.MaximumRetries + 1} attempts. {failure} No request content or credential was logged.",
+            $"OpenAI returned no valid structured result during {raw.Stage} after {_options.MaximumRetries + 1} attempts. {failure} No request content or credential was logged.",
             hasReportedUsage ? actualInputTokens : null,
             hasReportedUsage ? cachedInputTokens : null,
             hasReportedUsage ? actualOutputTokens : null,
             hasReportedUsage ? reasoningTokens : null);
     }
+
+    internal OpenAITransportPayload MapTransportPayload<T>(ApprovedReasoningRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.EnsureIntegrity();
+        var raw = request.Request;
+        return new OpenAITransportPayload(
+            raw.Model,
+            raw.MaximumOutputTokens,
+            raw.SystemInstructions,
+            raw.UserData,
+            _options.GetReasoningEffort(raw.Stage),
+            JsonNamingPolicy.SnakeCaseLower.ConvertName(typeof(T).Name),
+            ReasoningJsonSchema.For<T>());
+    }
+
     private static JsonSerializerOptions CreateJsonOptions()
     {
         var options = new JsonSerializerOptions

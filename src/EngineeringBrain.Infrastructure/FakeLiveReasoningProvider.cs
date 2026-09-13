@@ -27,32 +27,34 @@ public sealed class FakeLiveReasoningProvider : IReasoningProvider
     public string Name => "Fake";
 
     public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(
-        ReasoningRequest request,
+        ApprovedReasoningRequest request,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        request.EnsureIntegrity();
+        var raw = request.Request;
         object value = typeof(T) == typeof(InitiativeUnderstanding)
             ? _item.GoldenUnderstanding
             : typeof(T) == typeof(InitiativeAnalysis)
                 ? CreateAnalysis()
                 : throw new InvalidOperationException($"Fake live provider does not support {typeof(T).Name}.");
-        var effort = request.Stage == ReasoningStage.InitiativeUnderstanding
+        var effort = raw.Stage == ReasoningStage.InitiativeUnderstanding
             ? _interpretationEffort
             : _analysisEffort;
         return Task.FromResult(new ReasoningResult<T>(
             (T)value,
             new ReasoningCallUsage(
-                request.Stage,
+                raw.Stage,
                 Name,
-                request.Model,
-                request.EstimatedInputTokens,
-                request.EstimatedInputTokens,
-                _runNumber > 1 ? request.EstimatedInputTokens / 2 : 0,
-                request.Stage == ReasoningStage.InitiativeUnderstanding ? 120 : 240,
+                raw.Model,
+                raw.EstimatedInputTokens,
+                raw.EstimatedInputTokens,
+                _runNumber > 1 ? raw.EstimatedInputTokens / 2 : 0,
+                raw.Stage == ReasoningStage.InitiativeUnderstanding ? 120 : 240,
                 5,
                 0,
                 effort,
-                request.Stage == ReasoningStage.ArchitectureAnalysis ? 60 : 20)));
+                raw.Stage == ReasoningStage.ArchitectureAnalysis ? 60 : 20)));
     }
 
     private InitiativeAnalysis CreateAnalysis()

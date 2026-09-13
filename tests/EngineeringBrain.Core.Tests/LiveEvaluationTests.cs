@@ -1001,14 +1001,14 @@ public sealed class LiveEvaluationTests
     private sealed class ThrowingProvider(bool structured, int retries = 0) : IReasoningProvider
     {
         public string Name => "Fake";
-        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ReasoningRequest request, CancellationToken cancellationToken = default) =>
-            throw new ReasoningProviderException(request.Stage, structured, 10, retries, "safe failure", 30, 10, 5, 2);
+        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ApprovedReasoningRequest request, CancellationToken cancellationToken = default) =>
+            throw new ReasoningProviderException(request.Request.Stage, structured, 10, retries, "safe failure", 30, 10, 5, 2);
     }
 
     private sealed class RawThrowingProvider(string message) : IReasoningProvider
     {
         public string Name => "Fake";
-        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ReasoningRequest request, CancellationToken cancellationToken = default) =>
+        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ApprovedReasoningRequest request, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(message);
     }
 
@@ -1016,7 +1016,7 @@ public sealed class LiveEvaluationTests
     {
         public string Name => "Fake";
         public int Calls { get; private set; }
-        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ReasoningRequest request, CancellationToken cancellationToken = default)
+        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ApprovedReasoningRequest request, CancellationToken cancellationToken = default)
         {
             Calls++;
             throw new InvalidOperationException("should not be called");
@@ -1026,12 +1026,13 @@ public sealed class LiveEvaluationTests
     private sealed class ScriptedProvider(InitiativeUnderstanding understanding, InitiativeAnalysis analysis) : IReasoningProvider
     {
         public string Name => "Fake";
-        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ReasoningRequest request, CancellationToken cancellationToken = default)
+        public Task<ReasoningResult<T>> GenerateStructuredAsync<T>(ApprovedReasoningRequest request, CancellationToken cancellationToken = default)
         {
+            var raw = request.Request;
             object value = typeof(T) == typeof(InitiativeUnderstanding) ? understanding : analysis;
             return Task.FromResult(new ReasoningResult<T>((T)value,
-                new ReasoningCallUsage(request.Stage, Name, request.Model, request.EstimatedInputTokens,
-                    request.EstimatedInputTokens, 0, 10, 1, 0)));
+                new ReasoningCallUsage(raw.Stage, Name, raw.Model, raw.EstimatedInputTokens,
+                    raw.EstimatedInputTokens, 0, 10, 1, 0)));
         }
     }
 }

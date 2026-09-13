@@ -13,6 +13,7 @@ public sealed class InitiativeAnalysisService
     private readonly TokenEstimator _estimator;
     private readonly TokenBudgetOptions _budget;
     private readonly OutboundContextGuard _outboundGuard;
+    private readonly OutboundRequestGate _outboundGate;
 
     public InitiativeAnalysisService(
         IReasoningProvider provider,
@@ -23,7 +24,8 @@ public sealed class InitiativeAnalysisService
         LocalInitiativeAnalysisStore? store = null,
         TokenEstimator? estimator = null,
         TokenBudgetOptions? budget = null,
-        OutboundContextGuard? outboundGuard = null)
+        OutboundContextGuard? outboundGuard = null,
+        OutboundRequestGate? outboundGate = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _retriever = retriever ?? new InitiativeCandidateRetriever();
@@ -34,6 +36,7 @@ public sealed class InitiativeAnalysisService
         _policyValidator = policyValidator ?? new PolicyComplianceValidator();
         _store = store ?? new LocalInitiativeAnalysisStore();
         _outboundGuard = outboundGuard ?? new OutboundContextGuard();
+        _outboundGate = outboundGate ?? new OutboundRequestGate(_outboundGuard);
     }
 
     public async Task<InitiativeAnalysisResult> AnalyzeAsync(
@@ -65,14 +68,15 @@ public sealed class InitiativeAnalysisService
         }
 
         _outboundGuard.ThrowIfInvalid(_outboundGuard.ValidateInitiative(request.InitiativeText));
-        var understandingCall = await _provider.GenerateStructuredAsync<InitiativeUnderstanding>(
-            new ReasoningRequest(
+        var understandingRequest = new ReasoningRequest(
                 ReasoningStage.InitiativeUnderstanding,
                 request.InterpretationModel,
                 InitiativeAnalysisPrompts.Understanding,
                 request.InitiativeText,
                 _budget.InitiativeOutputTokens,
-                understandingInputTokens),
+                understandingInputTokens);
+        var understandingCall = await _provider.GenerateStructuredAsync<InitiativeUnderstanding>(
+            _outboundGate.ApproveExact(understandingRequest),
             cancellationToken);
         var retrieval = _retriever.Retrieve(
             understandingCall.Value,
@@ -92,14 +96,15 @@ public sealed class InitiativeAnalysisService
         }
 
         _outboundGuard.ThrowIfInvalid(_outboundGuard.Validate(context));
-        var analysisCall = await _provider.GenerateStructuredAsync<InitiativeAnalysis>(
-            new ReasoningRequest(
+        var analysisRequest = new ReasoningRequest(
                 ReasoningStage.ArchitectureAnalysis,
                 request.ReasoningModel,
                 InitiativeAnalysisPrompts.ArchitectureAnalysis,
                 context.Content,
                 _budget.ReasoningOutputTokens,
-                reasoningInputTokens),
+                reasoningInputTokens);
+        var analysisCall = await _provider.GenerateStructuredAsync<InitiativeAnalysis>(
+            _outboundGate.ApproveExact(analysisRequest, context),
             cancellationToken);
         var validated = _validator.Validate(analysisCall.Value, request.Memory.SourceSnapshot);
         var governance = _policyValidator.Evaluate(validated);
