@@ -126,6 +126,87 @@ public sealed class OutboundContextGuardTests
         Assert.DoesNotContain(prohibitedValue, string.Join('\n', findings), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Inspect_ProsePrefixedRawSnapshotInsideProjectNoteIsBlocked()
+    {
+        const string payload = """
+            Evidence:
+            {"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}
+            """;
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_NestedRawSnapshotInsideGraphEvidenceIsBlocked()
+    {
+        const string payload = """
+            {"payload":{"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}}
+            """;
+        var context = Context(ContextSegmentKind.GraphEvidence, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_NestedRepositoryEnvelopeInsideProjectNoteIsBlocked()
+    {
+        const string payload = """
+            {"evidence":{"repository":{"name":"sample"},"files":[{"path":"src/A.cs","content":"content"}]}}
+            """;
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.CompleteRepository);
+    }
+
+    [Theory]
+    [InlineData(
+        "```json\n{\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}\n```",
+        PolicyContentScope.RawSnapshot)]
+    [InlineData(
+        "```json\n{\"repository\":{},\"files\":[{\"path\":\"src/A.cs\",\"content\":\"content\"}]}\n```",
+        PolicyContentScope.CompleteRepository)]
+    public void Inspect_FencedProhibitedJsonInsideAllowedSegmentIsBlocked(
+        string payload,
+        PolicyContentScope expectedCategory)
+    {
+        var context = Context(ContextSegmentKind.ComponentNote, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), expectedCategory);
+    }
+
+    [Fact]
+    public void Inspect_MultipleHarmlessOuterObjectsCannotHideRawSnapshot()
+    {
+        const string payload = """
+            {"outer":{"middle":{"inner":{"schemaVersion":3,"repository":{},"git":{},"projects":[],"entities":[],"relations":[]}}}}
+            """;
+        var context = Context(ContextSegmentKind.RootIndex, payload);
+
+        AssertFinding(_guard.Inspect(Request(context.Content), context), PolicyContentScope.RawSnapshot);
+    }
+
+    [Fact]
+    public void Inspect_ProhibitedObjectInOneOfMultipleAllowedSegmentsIsBlocked()
+    {
+        var segments = new[]
+        {
+            new ContextSegment(ContextSegmentKind.ProjectNote, "Project: EngineeringBrain.Core", 1, "test", 1, true),
+            new ContextSegment(
+                ContextSegmentKind.GraphEvidence,
+                "Evidence: {\"schemaVersion\":3,\"repository\":{},\"git\":{},\"projects\":[],\"entities\":[],\"relations\":[]}",
+                1,
+                "test",
+                1,
+                true)
+        };
+        var content = ContextSegmentRenderer.Render(segments);
+        var context = new InitiativeContext(content, 1, [], [], segments);
+
+        AssertFinding(_guard.Inspect(Request(content), context), PolicyContentScope.RawSnapshot);
+    }
+
     [Theory]
     [InlineData(ContextSegmentKind.ProjectNote)]
     [InlineData(ContextSegmentKind.GraphEvidence)]
@@ -137,6 +218,61 @@ public sealed class OutboundContextGuardTests
         var context = Context(kind, payload);
 
         Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Theory]
+    [InlineData("{\"metadata\":{\"repository\":\"engineering-brain\",\"counts\":{\"projects\":6,\"entities\":433}}}")]
+    [InlineData("{\"projectCount\":6,\"entityCount\":433,\"relationCount\":451}")]
+    [InlineData("Prose with {braces} that is not JSON.")]
+    [InlineData("Evidence: { malformed ordinary prose")]
+    public void Inspect_HarmlessNestedOrMalformedJsonLikeContentIsAllowed(string payload)
+    {
+        var context = Context(ContextSegmentKind.ProjectNote, payload);
+
+        Assert.Empty(_guard.Inspect(Request(context.Content), context));
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveJsonNestingFailsClosedWithoutRetention()
+    {
+        var payload = string.Concat(Enumerable.Repeat("{\"value\":", 65))
+            + "0"
+            + new string('}', 65);
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+        Assert.DoesNotContain(payload, finding.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveJsonCandidateCountFailsClosed()
+    {
+        var payload = string.Join('\n', Enumerable.Repeat("{\"metadata\":true}", 33));
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_ExcessiveJsonNodeCountFailsClosed()
+    {
+        var payload = "{\"items\":[" + string.Join(',', Enumerable.Repeat("{}", 10_001)) + "]}";
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
+    }
+
+    [Fact]
+    public void Inspect_OversizedInputFailsClosed()
+    {
+        var payload = new string('x', 1_000_001);
+
+        var finding = AssertFinding(_guard.Inspect(Request(payload)), PolicyContentScope.CompleteRepository);
+
+        Assert.Equal(OutboundInspectionReasonCode.InspectionFailure, finding.ReasonCode);
     }
 
     [Theory]

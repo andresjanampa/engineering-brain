@@ -8,6 +8,10 @@ public sealed partial class OutboundContextGuard
 {
     private const int MaximumFindingCount = 99;
     private const int MaximumCFamilyBodyLookaheadLines = 64;
+    private const int MaximumInspectionCharacters = 1_000_000;
+    private const int MaximumJsonCandidates = 32;
+    private const int MaximumJsonNestingDepth = 64;
+    private const int MaximumJsonNodesAndProperties = 10_000;
 
     private static readonly HashSet<ContextSegmentKind> AllowedCall2Kinds =
     [
@@ -36,16 +40,17 @@ public sealed partial class OutboundContextGuard
         ArgumentNullException.ThrowIfNull(request);
         var findings = new Dictionary<PolicyContentScope, FindingAccumulator>();
         var segmentFindings = new Dictionary<PolicyContentScope, FindingAccumulator>();
+        var budget = new InspectionBudget();
 
         try
         {
             if (context is not null)
             {
-                InspectContext(request, context, findings, segmentFindings);
+                InspectContext(request, context, findings, segmentFindings, budget);
             }
 
-            InspectText(request.SystemInstructions, findings);
-            InspectText(request.UserData, findings);
+            InspectText(request.SystemInstructions, findings, budget);
+            InspectText(request.UserData, findings, budget);
             MergeMissing(findings, segmentFindings);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -105,7 +110,8 @@ public sealed partial class OutboundContextGuard
         ReasoningRequest request,
         InitiativeContext context,
         Dictionary<PolicyContentScope, FindingAccumulator> findings,
-        Dictionary<PolicyContentScope, FindingAccumulator> segmentFindings)
+        Dictionary<PolicyContentScope, FindingAccumulator> segmentFindings,
+        InspectionBudget budget)
     {
         foreach (var segment in context.Segments)
         {
@@ -132,7 +138,7 @@ public sealed partial class OutboundContextGuard
                     break;
             }
 
-            InspectText(segment.Content, segmentFindings);
+            InspectText(segment.Content, segmentFindings, budget);
         }
 
         var rendered = ContextSegmentRenderer.Render(context.Segments);
@@ -159,20 +165,18 @@ public sealed partial class OutboundContextGuard
 
     private void InspectText(
         string content,
-        Dictionary<PolicyContentScope, FindingAccumulator> findings)
+        Dictionary<PolicyContentScope, FindingAccumulator> findings,
+        InspectionBudget budget)
     {
         ArgumentNullException.ThrowIfNull(content);
+        budget.ExamineCharacters(content.Length);
 
-        if (LooksLikeRepositoryEnvelope(content) || RecursiveFilePayloadCount(content) >= 3)
+        InspectJsonObjects(content, findings, budget);
+
+        if (RecursiveFilePayloadCount(content) >= 3)
         {
             Add(findings, PolicyContentScope.CompleteRepository,
                 OutboundInspectionReasonCode.CompleteRepositoryPayload, OutboundTriggerKind.ContentPattern, 1);
-        }
-
-        if (LooksLikeRawSnapshot(content))
-        {
-            Add(findings, PolicyContentScope.RawSnapshot,
-                OutboundInspectionReasonCode.RawSnapshotPayload, OutboundTriggerKind.ContentPattern, 1);
         }
 
         var sourceBodies = CountCFamilyBodies(content)
@@ -200,70 +204,167 @@ public sealed partial class OutboundContextGuard
             OutboundInspectionReasonCode.AbsoluteLocalPath, OutboundTriggerKind.ContentPattern, absolutePaths);
     }
 
-    private static bool LooksLikeRepositoryEnvelope(string content)
+    private static void InspectJsonObjects(
+        string content,
+        Dictionary<PolicyContentScope, FindingAccumulator> findings,
+        InspectionBudget budget)
     {
-        if (!TryParseObject(content, out var document))
+        for (var start = 0; start < content.Length; start++)
         {
-            return false;
-        }
-
-        using (document)
-        {
-            var root = document.RootElement;
-            var hasRepository = TryGetProperty(root, "repository", out _)
-                || TryGetProperty(root, "repositoryId", out _);
-            if (!hasRepository
-                || !TryGetProperty(root, "files", out var files)
-                || files.ValueKind != JsonValueKind.Array)
+            if (content[start] != '{')
             {
-                return false;
+                continue;
             }
 
-            return files.EnumerateArray().Any(file => file.ValueKind == JsonValueKind.Object
-                && TryGetProperty(file, "path", out _)
-                && TryGetProperty(file, "content", out _));
+            budget.AddJsonCandidate();
+            var end = FindJsonObjectEnd(content, start, budget);
+            if (end < 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(content.AsMemory(start, end - start + 1));
+                InspectJsonTree(document.RootElement, findings, budget);
+                start = end;
+            }
+            catch (JsonException)
+            {
+                start = end;
+            }
         }
     }
 
-    private static bool LooksLikeRawSnapshot(string content)
+    private static int FindJsonObjectEnd(string content, int start, InspectionBudget budget)
     {
-        if (!TryParseObject(content, out var document))
+        Span<char> expectedClosures = stackalloc char[MaximumJsonNestingDepth];
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var index = start; index < content.Length; index++)
+        {
+            var character = content[index];
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (character == '\\')
+                {
+                    escaped = true;
+                }
+                else if (character == '"')
+                {
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            if (character == '"')
+            {
+                inString = true;
+                continue;
+            }
+
+            if (character is '{' or '[')
+            {
+                depth++;
+                budget.EnsureJsonNestingDepth(depth);
+                expectedClosures[depth - 1] = character == '{' ? '}' : ']';
+                continue;
+            }
+
+            if (character is not ('}' or ']'))
+            {
+                continue;
+            }
+
+            if (depth == 0 || expectedClosures[depth - 1] != character)
+            {
+                return -1;
+            }
+
+            depth--;
+            if (depth == 0)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static void InspectJsonTree(
+        JsonElement root,
+        Dictionary<PolicyContentScope, FindingAccumulator> findings,
+        InspectionBudget budget)
+    {
+        var pending = new Stack<(JsonElement Element, int Depth)>();
+        budget.VisitJsonNode(1);
+        pending.Push((root, 1));
+
+        while (pending.TryPop(out var current))
+        {
+            if (current.Element.ValueKind == JsonValueKind.Object)
+            {
+                if (LooksLikeRepositoryEnvelope(current.Element))
+                {
+                    Add(findings, PolicyContentScope.CompleteRepository,
+                        OutboundInspectionReasonCode.CompleteRepositoryPayload, OutboundTriggerKind.ContentPattern, 1);
+                }
+
+                if (LooksLikeRawSnapshot(current.Element))
+                {
+                    Add(findings, PolicyContentScope.RawSnapshot,
+                        OutboundInspectionReasonCode.RawSnapshotPayload, OutboundTriggerKind.ContentPattern, 1);
+                }
+
+                foreach (var property in current.Element.EnumerateObject())
+                {
+                    budget.VisitJsonProperty();
+                    budget.VisitJsonNode(current.Depth + 1);
+                    pending.Push((property.Value, current.Depth + 1));
+                }
+            }
+            else if (current.Element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in current.Element.EnumerateArray())
+                {
+                    budget.VisitJsonNode(current.Depth + 1);
+                    pending.Push((item, current.Depth + 1));
+                }
+            }
+        }
+    }
+
+    private static bool LooksLikeRepositoryEnvelope(JsonElement root)
+    {
+        var hasRepository = TryGetProperty(root, "repository", out _)
+            || TryGetProperty(root, "repositoryId", out _);
+        if (!hasRepository
+            || !TryGetProperty(root, "files", out var files)
+            || files.ValueKind != JsonValueKind.Array)
         {
             return false;
         }
 
-        using (document)
-        {
-            var root = document.RootElement;
-            return new[] { "schemaVersion", "repository", "git", "projects", "entities", "relations" }
-                .All(property => TryGetProperty(root, property, out _));
-        }
+        return files.EnumerateArray().Any(file => file.ValueKind == JsonValueKind.Object
+            && TryGetProperty(file, "path", out _)
+            && TryGetProperty(file, "content", out _));
     }
+
+    private static bool LooksLikeRawSnapshot(JsonElement root) =>
+        new[] { "schemaVersion", "repository", "git", "projects", "entities", "relations" }
+            .All(property => TryGetProperty(root, property, out _));
 
     private static bool LooksLikeLegacyRawSnapshot(string content) =>
         content.Contains("\"schemaVersion\"", StringComparison.OrdinalIgnoreCase)
         && content.Contains("\"entities\"", StringComparison.OrdinalIgnoreCase)
         && content.Contains("\"relations\"", StringComparison.OrdinalIgnoreCase);
-
-    private static bool TryParseObject(string content, out JsonDocument document)
-    {
-        try
-        {
-            document = JsonDocument.Parse(content);
-            if (document.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                return true;
-            }
-
-            document.Dispose();
-        }
-        catch (JsonException)
-        {
-        }
-
-        document = null!;
-        return false;
-    }
 
     private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
     {
@@ -573,6 +674,56 @@ public sealed partial class OutboundContextGuard
             triggerKind,
             _count,
             _capped);
+    }
+
+    private sealed class InspectionBudget
+    {
+        private int _charactersExamined;
+        private int _jsonCandidates;
+        private int _jsonNodesAndProperties;
+
+        public void ExamineCharacters(int count)
+        {
+            _charactersExamined = checked(_charactersExamined + count);
+            if (_charactersExamined > MaximumInspectionCharacters)
+            {
+                throw new InvalidDataException("Outbound inspection character limit exceeded.");
+            }
+        }
+
+        public void AddJsonCandidate()
+        {
+            _jsonCandidates++;
+            if (_jsonCandidates > MaximumJsonCandidates)
+            {
+                throw new InvalidDataException("Outbound JSON candidate limit exceeded.");
+            }
+        }
+
+        public void EnsureJsonNestingDepth(int depth)
+        {
+            if (depth > MaximumJsonNestingDepth)
+            {
+                throw new InvalidDataException("Outbound JSON nesting limit exceeded.");
+            }
+        }
+
+        public void VisitJsonNode(int depth)
+        {
+            EnsureJsonNestingDepth(depth);
+            AddJsonNodeOrProperty();
+        }
+
+        public void VisitJsonProperty() => AddJsonNodeOrProperty();
+
+        private void AddJsonNodeOrProperty()
+        {
+            _jsonNodesAndProperties++;
+            if (_jsonNodesAndProperties > MaximumJsonNodesAndProperties)
+            {
+                throw new InvalidDataException("Outbound JSON traversal limit exceeded.");
+            }
+        }
     }
 
     [GeneratedRegex(@"[A-Za-z]:[\\/]", RegexOptions.CultureInvariant)]
