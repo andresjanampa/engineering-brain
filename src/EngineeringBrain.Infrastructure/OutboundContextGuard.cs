@@ -428,8 +428,9 @@ public sealed partial class OutboundContextGuard
 
             if (state == CFamilyScanState.CollectingHeader)
             {
-                var openingBrace = line.IndexOf('{');
-                var terminator = line.IndexOf(';');
+                var structure = ScanCFamilyStructure(line);
+                var openingBrace = structure.OpeningBrace;
+                var terminator = structure.Terminator;
                 var headerEnd = openingBrace >= 0 ? openingBrace : line.Length;
                 if (terminator >= 0 && terminator < headerEnd)
                 {
@@ -460,7 +461,7 @@ public sealed partial class OutboundContextGuard
                 continue;
             }
 
-            if (line.Contains('}'))
+            if (ScanCFamilyStructure(line).ClosingBrace >= 0)
             {
                 ResetCFamilyScan();
             }
@@ -478,7 +479,9 @@ public sealed partial class OutboundContextGuard
     private static bool IsCFamilyDeclarationHeader(string header)
     {
         var text = header.Trim();
-        if (text.Length == 0 || text.EndsWith(';') || text.Contains("=>", StringComparison.Ordinal))
+        if (text.Length == 0
+            || ScanCFamilyStructure(text).Terminator >= 0
+            || text.Contains("=>", StringComparison.Ordinal))
         {
             return false;
         }
@@ -525,8 +528,9 @@ public sealed partial class OutboundContextGuard
             return nameIndex < tokens.Length && CFamilyIdentifier().IsMatch(tokens[nameIndex]);
         }
 
-        var openParenthesis = text.IndexOf('(');
-        var closeParenthesis = FindMatchingParenthesis(text, openParenthesis);
+        var structure = ScanCFamilyStructure(text);
+        var openParenthesis = structure.OpeningParenthesis;
+        var closeParenthesis = structure.ClosingParenthesis;
         if (openParenthesis <= 0
             || closeParenthesis < openParenthesis
             || !IsCFamilyDeclarationSuffix(text[(closeParenthesis + 1)..]))
@@ -589,8 +593,9 @@ public sealed partial class OutboundContextGuard
             return false;
         }
 
-        var openingBrace = text.IndexOf('{');
-        var semicolon = text.IndexOf(';');
+        var structure = ScanCFamilyStructure(text);
+        var openingBrace = structure.OpeningBrace;
+        var semicolon = structure.Terminator;
         var end = openingBrace >= 0 ? openingBrace : semicolon >= 0 ? semicolon : text.Length;
         var candidate = text[..end].Trim();
         var tokens = candidate.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
@@ -610,7 +615,7 @@ public sealed partial class OutboundContextGuard
             return true;
         }
 
-        var openParenthesis = candidate.IndexOf('(');
+        var openParenthesis = ScanCFamilyStructure(candidate).OpeningParenthesis;
         if (openParenthesis <= 0)
         {
             return false;
@@ -654,7 +659,7 @@ public sealed partial class OutboundContextGuard
     private static string StripCFamilyComments(string line, ref bool inBlockComment)
     {
         var result = new StringBuilder(line.Length);
-        var quote = '\0';
+        var lexicalState = CFamilyLexicalState.Normal;
         var escaped = false;
 
         for (var index = 0; index < line.Length; index++)
@@ -673,28 +678,8 @@ public sealed partial class OutboundContextGuard
                 continue;
             }
 
-            if (quote != '\0')
+            if (!IsUnquotedCFamilyCharacter(character, ref lexicalState, ref escaped))
             {
-                result.Append(character);
-                if (escaped)
-                {
-                    escaped = false;
-                }
-                else if (character == '\\')
-                {
-                    escaped = true;
-                }
-                else if (character == quote)
-                {
-                    quote = '\0';
-                }
-
-                continue;
-            }
-
-            if (character is '\'' or '"')
-            {
-                quote = character;
                 result.Append(character);
                 continue;
             }
@@ -717,22 +702,100 @@ public sealed partial class OutboundContextGuard
         return result.ToString();
     }
 
-    private static int FindMatchingParenthesis(string value, int openingParenthesis)
+    private static CFamilyStructure ScanCFamilyStructure(string value)
     {
-        var depth = 0;
-        for (var index = openingParenthesis; index < value.Length; index++)
+        var openingBrace = -1;
+        var closingBrace = -1;
+        var terminator = -1;
+        var openingParenthesis = -1;
+        var closingParenthesis = -1;
+        var parenthesisDepth = 0;
+        var lexicalState = CFamilyLexicalState.Normal;
+        var escaped = false;
+
+        for (var index = 0; index < value.Length; index++)
         {
-            if (value[index] == '(')
+            var character = value[index];
+            if (!IsUnquotedCFamilyCharacter(character, ref lexicalState, ref escaped))
             {
-                depth++;
+                continue;
             }
-            else if (value[index] == ')' && --depth == 0)
+
+            switch (character)
             {
-                return index;
+                case '{' when openingBrace < 0:
+                    openingBrace = index;
+                    break;
+                case '}' when closingBrace < 0:
+                    closingBrace = index;
+                    break;
+                case ';' when terminator < 0:
+                    terminator = index;
+                    break;
+                case '(' when closingParenthesis < 0:
+                    if (parenthesisDepth == 0 && openingParenthesis < 0)
+                    {
+                        openingParenthesis = index;
+                    }
+
+                    parenthesisDepth++;
+                    break;
+                case ')' when parenthesisDepth > 0 && closingParenthesis < 0:
+                    parenthesisDepth--;
+                    if (parenthesisDepth == 0)
+                    {
+                        closingParenthesis = index;
+                    }
+
+                    break;
             }
         }
 
-        return -1;
+        return new CFamilyStructure(
+            openingBrace,
+            closingBrace,
+            terminator,
+            openingParenthesis,
+            closingParenthesis);
+    }
+
+    private static bool IsUnquotedCFamilyCharacter(
+        char character,
+        ref CFamilyLexicalState state,
+        ref bool escaped)
+    {
+        if (state != CFamilyLexicalState.Normal)
+        {
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (character == '\\')
+            {
+                escaped = true;
+            }
+            else if ((state == CFamilyLexicalState.DoubleQuotedString && character == '"')
+                || (state == CFamilyLexicalState.SingleQuotedCharacter && character == '\''))
+            {
+                state = CFamilyLexicalState.Normal;
+            }
+
+            return false;
+        }
+
+        if (character == '"')
+        {
+            state = CFamilyLexicalState.DoubleQuotedString;
+            return false;
+        }
+
+        if (character == '\'')
+        {
+            state = CFamilyLexicalState.SingleQuotedCharacter;
+            return false;
+        }
+
+        return true;
     }
 
     private static bool IsCFamilyDeclarationSuffix(string value)
@@ -755,6 +818,20 @@ public sealed partial class OutboundContextGuard
         CollectingHeader,
         WaitingForBodyEvidence
     }
+
+    private enum CFamilyLexicalState
+    {
+        Normal,
+        DoubleQuotedString,
+        SingleQuotedCharacter
+    }
+
+    private readonly record struct CFamilyStructure(
+        int OpeningBrace,
+        int ClosingBrace,
+        int Terminator,
+        int OpeningParenthesis,
+        int ClosingParenthesis);
 
     private static bool IsCFamilyModifier(string value) => value is
         "public" or "private" or "protected" or "internal" or "static" or "abstract" or "sealed"

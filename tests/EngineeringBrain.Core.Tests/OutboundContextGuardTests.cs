@@ -434,6 +434,22 @@ public sealed class OutboundContextGuardTests
         AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
     }
 
+    [Theory]
+    [InlineData("public void Save(string value = \"{\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"}\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \";\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"(\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \")\")\n{\n    return;\n}")]
+    [InlineData("public void Save(char value = '{')\n{\n    return;\n}")]
+    [InlineData("public void Save(char value = ';')\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"\\\"{;()\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"// not comment\")\n{\n    return;\n}")]
+    [InlineData("public void Save(string value = \"/* not comment */\")\n{\n    return;\n}")]
+    public void Inspect_QuotedCFamilyStructuralDelimitersCannotHideBody(string sourceBody)
+    {
+        AssertFinding(_guard.Inspect(Request(sourceBody)), PolicyContentScope.SourceBodies);
+    }
+
     [Fact]
     public void Inspect_WhitespaceAndCommentsBetweenDeclarationAndBraceCannotHideBody()
     {
@@ -476,6 +492,24 @@ public sealed class OutboundContextGuardTests
     public void Inspect_MultilineSignatureOrCommentOnlyBlockIsAllowed(string content)
     {
         Assert.Empty(_guard.Inspect(Request(content)));
+    }
+
+    [Theory]
+    [InlineData("public void Save(string value = \"{\");")]
+    [InlineData("public void Save(string value = \"}\");")]
+    [InlineData("public void Save(string value = \";\");")]
+    [InlineData("public void Save(string value = \"(\");")]
+    [InlineData("public void Save(string value = \")\");")]
+    [InlineData("public void Save(char value = '{');")]
+    [InlineData("public void Save(char value = ';');")]
+    [InlineData("public void Save(string value = \"\\\"{;()\");")]
+    [InlineData("public void Save(string value = \"// not comment\");")]
+    [InlineData("public void Save(string value = \"/* not comment */\");")]
+    [InlineData("class Customer\n{\n    // { } ; ( ) \\\"\n}")]
+    [InlineData("class Customer\n{\n    /* { } ; ( ) \\\" */\n}")]
+    public void Inspect_QuotedCFamilyStructuralDelimiterSignaturesWithoutBodiesAreAllowed(string signature)
+    {
+        Assert.Empty(_guard.Inspect(Request(signature)));
     }
 
     [Fact]
