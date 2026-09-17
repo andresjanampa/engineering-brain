@@ -111,11 +111,17 @@ Promote reviewed decisions from one branch-scoped catalog to the current checked
 
 ```powershell
 brain concepts promote <source-branch> <target-branch> [--repo <path>]
+brain concepts remap --reviewer <reviewer> --map <old-id> <new-id> [--map <old> <new> ...] [--repo <path>]
+brain concepts refresh [path]
 ```
 
 The target checkout must already be on `target-branch`, have a stable HEAD, and be clean. To target another checkout, pass its path with `--repo`; the command never checks out, creates, switches, or fetches branches. Promotion reads the source catalog as reviewed semantic decisions, then rebinds every assignment to fresh target evidence and recomputes source references and fingerprints. One unprovable assignment blocks the entire operation, so there is no partial promotion. An existing invalid target also blocks replacement.
 
 Only the external `semantic/reviewed-concepts.json` artifact is mutable. `LocalReviewedConceptWriter` is the sole lifecycle mutation boundary; it uses an exclusive sibling lock, a flushed temporary file, a final expected-content check after repository validation, and atomic replacement. The lock serializes cooperating lifecycle writers; the final check detects non-cooperating changes during validation without claiming portable compare-and-swap protection after that read. Identical promotion returns `Unchanged` without rewriting the file. Normal analysis and Project Memory synchronization remain read-only with respect to reviewed concepts.
+
+`remap` is the only identity-changing operation. It requires a human-supplied reviewer and an exact old-to-new EntityId mapping for every RC400 assignment; it never suggests identities or silently drops assignments. The expected transformed `(ConceptId, EntityId)` set must exactly equal the reconstructed set. A successful remap upgrades schema 1 to schema 2 and records each decision in a deterministic identity-migration ledger with old/new IDs, affected concepts, repository/branch context, previous catalog hash, destination evidence, reviewer, UTC time, and record fingerprint. Schema 1 remains readable and byte-compatible when no history exists.
+
+`refresh` never changes EntityIds. It deterministically rebinds source references and recomputes RC401/RC402 evidence and declaration/catalog fingerprints for the current clean branch. RC400 always blocks refresh. Both mutation commands return `0` for success (`Unchanged` is also success), `3` when safely blocked, `2` for usage errors, `1` for operational failures, and `130` for cancellation. Recovery is explicit: inspect RC400 with `status`, run one authorized `remap` covering every missing identity, run `refresh`, then `validate`; no catalog bytes are replaced until the complete candidate passes the required checks.
 
 ## Analyze an initiative
 

@@ -38,7 +38,23 @@ public sealed record ReviewedConceptCatalog(
     int SourceSnapshotSchema,
     string SourceAnalyzerVersion,
     string VocabularyVersion,
-    IReadOnlyList<ReviewedConceptDeclaration> Declarations);
+    IReadOnlyList<ReviewedConceptDeclaration> Declarations)
+{
+    public IReadOnlyList<ReviewedConceptIdentityMigration> IdentityMigrations { get; init; } = [];
+}
+
+public sealed record ReviewedConceptIdentityMigration(
+    string RepositoryId,
+    string Branch,
+    string BranchKey,
+    string OldEntityId,
+    string NewEntityId,
+    IReadOnlyList<string> AffectedConceptIds,
+    string PreviousCatalogFingerprint,
+    string DestinationSourceReference,
+    string DestinationSourceFingerprint,
+    ReviewedConceptReview Review,
+    string Fingerprint);
 
 public sealed record ReviewedConceptDeclaration(
     string ConceptId,

@@ -10,6 +10,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="..\..\src\EngineeringBrain.Core\EngineeringBrain.Core.csproj" />
+    <ProjectReference Include="..\..\src\EngineeringBrain.Cli\EngineeringBrain.Cli.csproj" />
     <ProjectReference Include="..\..\src\EngineeringBrain.Infrastructure\EngineeringBrain.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

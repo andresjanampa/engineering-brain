@@ -94,7 +94,7 @@ internal static class BrainCli
     {
         if (args.Length < 2)
         {
-            Console.Error.WriteLine("Concepts requires status, validate, or promote.");
+            Console.Error.WriteLine("Concepts requires status, validate, promote, remap, or refresh.");
             WriteUsage();
             return 2;
         }
@@ -113,6 +113,30 @@ internal static class BrainCli
                 args.Length == 3 ? args[2] : Environment.CurrentDirectory);
         }
 
+        if (operation == "refresh")
+        {
+            if (args.Length > 3 || (args.Length == 3 && args[2].StartsWith("--", StringComparison.Ordinal)))
+            {
+                Console.Error.WriteLine("Usage: brain concepts refresh [path]");
+                return 2;
+            }
+
+            return await RunConceptRefreshAsync(
+                args.Length == 3 ? args[2] : Environment.CurrentDirectory);
+        }
+
+        if (operation == "remap")
+        {
+            if (!TryParseConceptRemap(args, out var remapOptions, out var remapError))
+            {
+                Console.Error.WriteLine(remapError);
+                WriteUsage();
+                return 2;
+            }
+
+            return await RunConceptRemapAsync(remapOptions);
+        }
+
         if (operation != "promote")
         {
             Console.Error.WriteLine("Unknown concepts command.");
@@ -129,6 +153,95 @@ internal static class BrainCli
         }
 
         return await RunConceptPromotionAsync(sourceBranch, targetBranch, repositoryPath);
+    }
+
+    private static async Task<int> RunConceptRefreshAsync(string path)
+    {
+        using var cancellation = CreateCancellationSource();
+        try
+        {
+            var context = await CreateConceptMutationContextAsync(path, cancellation.Token);
+            var result = await new ReviewedConceptLifecycleService().RefreshAsync(
+                context.RepositoryName,
+                context.RepositoryRoot,
+                context.BranchLocation,
+                context.Evidence,
+                context.Git,
+                cancellation.Token);
+            WriteConceptRefresh(result);
+            return ReviewedConceptLifecycleExitCode.ForRefresh(result.Outcome);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Command cancelled.");
+            return 130;
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or InvalidOperationException
+            or InvalidDataException)
+        {
+            Console.Error.WriteLine($"Concept refresh failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<int> RunConceptRemapAsync(ConceptRemapOptions options)
+    {
+        using var cancellation = CreateCancellationSource();
+        try
+        {
+            var context = await CreateConceptMutationContextAsync(
+                options.RepositoryPath, cancellation.Token);
+            var result = await new ReviewedConceptLifecycleService().RemapAsync(
+                context.RepositoryName,
+                context.RepositoryRoot,
+                context.BranchLocation,
+                context.Evidence,
+                context.Git,
+                options.Reviewer,
+                options.Mappings,
+                cancellation.Token);
+            WriteConceptRemap(result);
+            return ReviewedConceptLifecycleExitCode.ForRemap(result.Outcome);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Command cancelled.");
+            return 130;
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or InvalidOperationException
+            or InvalidDataException)
+        {
+            Console.Error.WriteLine($"Concept remap failed: {exception.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<ConceptMutationContext> CreateConceptMutationContextAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var repositoryRoot = new RepositoryRootLocator().Locate(path);
+        var scan = await AnalyzeRepositoryAsync(
+            repositoryRoot,
+            cancellationToken,
+            new TransientRepositorySnapshotStore());
+        var build = new ProjectMemoryBuilder().Build(scan.Snapshot);
+        var evidence = ReviewedConceptEvidenceContext.FromSnapshot(scan.Snapshot, build.Manifest);
+        var branchLocation = new LocalProjectMemoryStore().GetBranchLocation(
+            evidence.RepositoryId,
+            evidence.BranchKey);
+        return new ConceptMutationContext(
+            scan.Snapshot.Repository.Name,
+            repositoryRoot,
+            branchLocation,
+            evidence,
+            scan.Snapshot.Git);
     }
 
     private static async Task<int> RunConceptInspectionAsync(string operation, string path)
@@ -258,6 +371,92 @@ internal static class BrainCli
         }
 
         return true;
+    }
+
+    private static bool TryParseConceptRemap(
+        string[] args,
+        out ConceptRemapOptions options,
+        out string error)
+    {
+        const string usage = "Usage: brain concepts remap --reviewer <reviewer> "
+            + "--map <old-entity-id> <new-entity-id> [--map <old> <new> ...] [--repo <path>]";
+        options = null!;
+        error = usage;
+        string? reviewer = null;
+        string? repositoryPath = null;
+        var mappings = new List<ReviewedConceptIdentityMapping>();
+        for (var index = 2; index < args.Length;)
+        {
+            var option = args[index];
+            if (option.Equals("--reviewer", StringComparison.OrdinalIgnoreCase))
+            {
+                if (reviewer is not null || !TryReadOptionValues(args, index, 1, out var values))
+                {
+                    return false;
+                }
+
+                reviewer = values[0];
+                index += 2;
+                continue;
+            }
+
+            if (option.Equals("--map", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadOptionValues(args, index, 2, out var values))
+                {
+                    return false;
+                }
+
+                mappings.Add(new ReviewedConceptIdentityMapping(values[0], values[1]));
+                index += 3;
+                continue;
+            }
+
+            if (option.Equals("--repo", StringComparison.OrdinalIgnoreCase))
+            {
+                if (repositoryPath is not null || !TryReadOptionValues(args, index, 1, out var values))
+                {
+                    return false;
+                }
+
+                repositoryPath = values[0];
+                index += 2;
+                continue;
+            }
+
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(reviewer)
+            || mappings.Count == 0
+            || mappings.Select(item => item.OldEntityId).Distinct(StringComparer.Ordinal).Count()
+                != mappings.Count)
+        {
+            return false;
+        }
+
+        options = new ConceptRemapOptions(
+            reviewer,
+            mappings,
+            repositoryPath ?? Environment.CurrentDirectory);
+        return true;
+    }
+
+    private static bool TryReadOptionValues(
+        string[] args,
+        int optionIndex,
+        int count,
+        out string[] values)
+    {
+        values = [];
+        if (optionIndex + count >= args.Length)
+        {
+            return false;
+        }
+
+        values = args.Skip(optionIndex + 1).Take(count).ToArray();
+        return values.All(value => !string.IsNullOrWhiteSpace(value)
+            && !value.StartsWith("--", StringComparison.Ordinal));
     }
 
     private static async Task<int> RunAnalyzeAsync(string[] args)
@@ -734,6 +933,46 @@ internal static class BrainCli
         WriteConceptDiagnostics(result.Diagnostics);
     }
 
+    private static void WriteConceptRemap(ReviewedConceptRemapResult result)
+    {
+        Console.WriteLine("Engineering Brain");
+        WriteSection("Reviewed Concept Remap");
+        Console.WriteLine($"Outcome: {result.Outcome}");
+        Console.WriteLine($"Repository: {result.RepositoryName} ({result.RepositoryId})");
+        Console.WriteLine($"Branch: {result.Branch} ({result.BranchKey})");
+        Console.WriteLine($"Catalog: {result.CatalogPath}");
+        Console.WriteLine($"Previous fingerprint: {result.PreviousCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"New fingerprint: {result.NewCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"Mappings: {result.MappingCount}");
+        Console.WriteLine($"Remapped assignments: {result.RemappedAssignmentCount}");
+        Console.WriteLine($"Declarations: {result.DeclarationCount}");
+        Console.WriteLine($"Assignments: {result.AssignmentCount}");
+        Console.WriteLine($"Resolved profiles: {result.ActiveProfileCount}");
+        Console.WriteLine($"Identity migrations: {result.IdentityMigrationCount}");
+        Console.WriteLine($"Remaining stale assignments: {result.RemainingStaleAssignmentCount}");
+        WriteConceptDiagnostics(result.Diagnostics);
+    }
+
+    private static void WriteConceptRefresh(ReviewedConceptRefreshResult result)
+    {
+        Console.WriteLine("Engineering Brain");
+        WriteSection("Reviewed Concept Refresh");
+        Console.WriteLine($"Outcome: {result.Outcome}");
+        Console.WriteLine($"Repository: {result.RepositoryName} ({result.RepositoryId})");
+        Console.WriteLine($"Branch: {result.Branch} ({result.BranchKey})");
+        Console.WriteLine($"Catalog: {result.CatalogPath}");
+        Console.WriteLine($"Previous fingerprint: {result.PreviousCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"New fingerprint: {result.NewCatalogFingerprint ?? "n/a"}");
+        Console.WriteLine($"Declarations: {result.DeclarationCount}");
+        Console.WriteLine($"Assignments: {result.AssignmentCount}");
+        Console.WriteLine($"Resolved profiles: {result.ActiveProfileCount}");
+        Console.WriteLine($"Recomputed assignments: {result.RecomputedAssignmentCount}");
+        Console.WriteLine($"Recomputed declaration fingerprints: {result.RecomputedDeclarationFingerprintCount}");
+        Console.WriteLine($"Rebound source references: {result.ReboundSourceReferenceCount}");
+        Console.WriteLine($"Rejected or stale assignments: {result.RejectedOrStaleAssignmentCount}");
+        WriteConceptDiagnostics(result.Diagnostics);
+    }
+
     private static void WriteConceptDiagnostics(IReadOnlyList<ReviewedConceptDiagnostic> diagnostics)
     {
         if (diagnostics.Count == 0)
@@ -1200,6 +1439,8 @@ internal static class BrainCli
         Console.WriteLine("       brain concepts status [path]");
         Console.WriteLine("       brain concepts validate [path]");
         Console.WriteLine("       brain concepts promote <source-branch> <target-branch> [--repo <path>]");
+        Console.WriteLine("       brain concepts remap --reviewer <reviewer> --map <old-id> <new-id> [--map <old> <new> ...] [--repo <path>]");
+        Console.WriteLine("       brain concepts refresh [path]");
         Console.WriteLine("       brain eval [repository-or-suite-path] [--update-baseline]");
         Console.WriteLine("       brain eval-live [repository-or-live-suite] [--preview | --fake-provider | --allow-remote]");
         Console.WriteLine("           [--case <id>] [--runs <1-3>] [--pricing <pricing.json>]");
@@ -1220,6 +1461,18 @@ internal static class BrainCli
         string ReasoningModel,
         string InterpretationEffort,
         string AnalysisEffort);
+
+    private sealed record ConceptRemapOptions(
+        string Reviewer,
+        IReadOnlyList<ReviewedConceptIdentityMapping> Mappings,
+        string RepositoryPath);
+
+    private sealed record ConceptMutationContext(
+        string RepositoryName,
+        string RepositoryRoot,
+        string BranchLocation,
+        ReviewedConceptEvidenceContext Evidence,
+        GitInfo Git);
 
     private sealed record LiveEvaluationOptions(
         string InputPath,

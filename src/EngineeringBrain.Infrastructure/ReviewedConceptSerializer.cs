@@ -6,14 +6,26 @@ namespace EngineeringBrain.Infrastructure;
 
 public static class ReviewedConceptSerializer
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int MinimumSupportedSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     private static readonly JsonSerializerOptions Options = CreateOptions();
 
     public static string Serialize(ReviewedConceptCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        var json = JsonSerializer.Serialize(Canonicalize(catalog), Options);
+        var canonical = Canonicalize(catalog);
+        var json = catalog.SchemaVersion == 1
+            ? JsonSerializer.Serialize(new SchemaOneCatalog(
+                canonical.SchemaVersion,
+                canonical.RepositoryId,
+                canonical.Branch,
+                canonical.BranchKey,
+                canonical.SourceSnapshotSchema,
+                canonical.SourceAnalyzerVersion,
+                canonical.VocabularyVersion,
+                canonical.Declarations), Options)
+            : JsonSerializer.Serialize(canonical, Options);
         return KnowledgeIdentity.NormalizeLineEndings(json).TrimEnd('\n') + "\n";
     }
 
@@ -50,6 +62,21 @@ public static class ReviewedConceptSerializer
         && catalog.BranchKey is not null
         && catalog.SourceAnalyzerVersion is not null
         && catalog.VocabularyVersion is not null
+        && catalog.IdentityMigrations is not null
+        && catalog.IdentityMigrations.All(migration => migration is not null
+            && migration.RepositoryId is not null
+            && migration.Branch is not null
+            && migration.BranchKey is not null
+            && migration.OldEntityId is not null
+            && migration.NewEntityId is not null
+            && migration.AffectedConceptIds is not null
+            && migration.AffectedConceptIds.All(conceptId => conceptId is not null)
+            && migration.PreviousCatalogFingerprint is not null
+            && migration.DestinationSourceReference is not null
+            && migration.DestinationSourceFingerprint is not null
+            && migration.Review is not null
+            && migration.Review.Reviewer is not null
+            && migration.Fingerprint is not null)
         && catalog.Declarations is not null
         && catalog.Declarations.All(declaration => declaration is not null
             && declaration.ConceptId is not null
@@ -74,6 +101,13 @@ public static class ReviewedConceptSerializer
 
     public static ReviewedConceptCatalog Canonicalize(ReviewedConceptCatalog catalog) => catalog with
     {
+        IdentityMigrations = catalog.IdentityMigrations
+            .Select(CanonicalizeMigration)
+            .OrderBy(item => item.Review.ReviewedAtUtc)
+            .ThenBy(item => item.OldEntityId, StringComparer.Ordinal)
+            .ThenBy(item => item.NewEntityId, StringComparer.Ordinal)
+            .ThenBy(item => item.Fingerprint, StringComparer.Ordinal)
+            .ToArray(),
         Declarations = catalog.Declarations
             .Select(declaration => declaration with
             {
@@ -133,6 +167,38 @@ public static class ReviewedConceptSerializer
         return KnowledgeIdentity.ContentHash(JsonSerializer.Serialize(payload, Options));
     }
 
+    public static string CreateIdentityMigrationFingerprint(ReviewedConceptIdentityMigration migration)
+    {
+        ArgumentNullException.ThrowIfNull(migration);
+        var canonical = CanonicalizeMigration(migration);
+        var payload = new IdentityMigrationFingerprintPayload(
+            canonical.RepositoryId,
+            canonical.Branch,
+            canonical.BranchKey,
+            canonical.OldEntityId,
+            canonical.NewEntityId,
+            canonical.AffectedConceptIds,
+            canonical.PreviousCatalogFingerprint,
+            canonical.DestinationSourceReference,
+            canonical.DestinationSourceFingerprint,
+            canonical.Review);
+        return KnowledgeIdentity.ContentHash(JsonSerializer.Serialize(payload, Options));
+    }
+
+    private static ReviewedConceptIdentityMigration CanonicalizeMigration(
+        ReviewedConceptIdentityMigration migration) => migration with
+        {
+            AffectedConceptIds = migration.AffectedConceptIds
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray(),
+            Review = migration.Review with
+            {
+                Reviewer = KnowledgeIdentity.NormalizeLineEndings(migration.Review.Reviewer),
+                ReviewedAtUtc = migration.Review.ReviewedAtUtc.ToUniversalTime()
+            }
+        };
+
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions
@@ -155,4 +221,26 @@ public static class ReviewedConceptSerializer
         IReadOnlyList<ReviewedConceptAssignment> Assignments,
         ReviewedConceptProvenance Provenance,
         ReviewedConceptReview Review);
+
+    private sealed record IdentityMigrationFingerprintPayload(
+        string RepositoryId,
+        string Branch,
+        string BranchKey,
+        string OldEntityId,
+        string NewEntityId,
+        IReadOnlyList<string> AffectedConceptIds,
+        string PreviousCatalogFingerprint,
+        string DestinationSourceReference,
+        string DestinationSourceFingerprint,
+        ReviewedConceptReview Review);
+
+    private sealed record SchemaOneCatalog(
+        int SchemaVersion,
+        string RepositoryId,
+        string Branch,
+        string BranchKey,
+        int SourceSnapshotSchema,
+        string SourceAnalyzerVersion,
+        string VocabularyVersion,
+        IReadOnlyList<ReviewedConceptDeclaration> Declarations);
 }
