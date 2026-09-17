@@ -185,24 +185,34 @@ public sealed partial class ReviewedConceptValidator
             }
 
             var invalid = string.IsNullOrWhiteSpace(migration.RepositoryId)
+                || HasControlCharacters(migration.RepositoryId)
                 || string.IsNullOrWhiteSpace(migration.Branch)
+                || HasControlCharacters(migration.Branch)
+                || HasControlCharacters(migration.BranchKey)
                 || !string.Equals(
                     migration.BranchKey,
                     KnowledgeIdentity.CreateBranchKey(migration.Branch),
                     StringComparison.Ordinal)
                 || string.IsNullOrWhiteSpace(migration.OldEntityId)
+                || HasControlCharacters(migration.OldEntityId)
                 || string.IsNullOrWhiteSpace(migration.NewEntityId)
+                || HasControlCharacters(migration.NewEntityId)
                 || string.Equals(migration.OldEntityId, migration.NewEntityId, StringComparison.Ordinal)
                 || migration.AffectedConceptIds.Count == 0
                 || migration.AffectedConceptIds.Any(string.IsNullOrWhiteSpace)
+                || migration.AffectedConceptIds.Any(HasControlCharacters)
                 || migration.AffectedConceptIds.Distinct(StringComparer.Ordinal).Count()
                     != migration.AffectedConceptIds.Count
                 || string.IsNullOrWhiteSpace(migration.PreviousCatalogFingerprint)
+                || HasControlCharacters(migration.PreviousCatalogFingerprint)
+                || HasControlCharacters(migration.DestinationSourceReference)
                 || !IsNormalizedRelativeSourceReference(migration.DestinationSourceReference)
                 || string.IsNullOrWhiteSpace(migration.DestinationSourceFingerprint)
+                || HasControlCharacters(migration.DestinationSourceFingerprint)
                 || string.IsNullOrWhiteSpace(migration.Review.Reviewer)
                 || migration.Review.Version <= 0
                 || migration.Review.ReviewedAtUtc.Offset != TimeSpan.Zero
+                || HasControlCharacters(migration.Fingerprint)
                 || !string.Equals(
                     migration.Fingerprint,
                     ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(migration),
@@ -362,6 +372,8 @@ public sealed partial class ReviewedConceptValidator
             && !path.StartsWith("/", StringComparison.Ordinal)
             && path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not "..");
     }
+
+    private static bool HasControlCharacters(string value) => value.Any(char.IsControl);
 
     private static void AddCatalogError(
         bool condition,

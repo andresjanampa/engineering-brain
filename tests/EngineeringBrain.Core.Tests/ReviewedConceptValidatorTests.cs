@@ -100,6 +100,62 @@ public sealed class ReviewedConceptValidatorTests
         Assert.Empty(result.Diagnostics);
     }
 
+    [Theory]
+    [InlineData("repository-id")]
+    [InlineData("branch")]
+    [InlineData("old-entity-id")]
+    [InlineData("new-entity-id")]
+    [InlineData("affected-concept-id")]
+    [InlineData("previous-catalog-fingerprint")]
+    [InlineData("destination-source-reference")]
+    [InlineData("destination-source-fingerprint")]
+    public void ValidateIntegrity_MigrationStructuralFieldsRejectControlCharacters(string field)
+    {
+        var migration = Migration();
+        migration = field switch
+        {
+            "repository-id" => migration with { RepositoryId = "repository\u0001" },
+            "branch" => migration with
+            {
+                Branch = "main\u0001",
+                BranchKey = KnowledgeIdentity.CreateBranchKey("main\u0001")
+            },
+            "old-entity-id" => migration with { OldEntityId = "entity:old\u0001" },
+            "new-entity-id" => migration with { NewEntityId = "entity:new\u0001" },
+            "affected-concept-id" => migration with { AffectedConceptIds = ["concept\u0001"] },
+            "previous-catalog-fingerprint" => migration with
+            {
+                PreviousCatalogFingerprint = "previous\u0001"
+            },
+            "destination-source-reference" => migration with
+            {
+                DestinationSourceReference = "src/New\u0001.cs:10"
+            },
+            "destination-source-fingerprint" => migration with
+            {
+                DestinationSourceFingerprint = "source\u0001"
+            },
+            _ => throw new InvalidOperationException()
+        };
+        migration = WithFingerprint(migration);
+        var catalog = ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            RepositoryId = migration.RepositoryId,
+            Branch = migration.Branch,
+            BranchKey = migration.BranchKey,
+            IdentityMigrations = [migration]
+        };
+
+        var result = new ReviewedConceptValidator().ValidateIntegrity(
+            catalog,
+            new ReviewedConceptCatalogIdentity(catalog.RepositoryId, catalog.Branch, catalog.BranchKey));
+
+        Assert.False(result.CatalogIsValid);
+        Assert.Empty(result.Declarations);
+        Assert.Contains(result.Diagnostics, item => item.Code == "RC111");
+    }
+
     [Fact]
     public void ValidateIntegrity_UsesExpectedSourceIdentityWithoutResolvingSourceCode()
     {

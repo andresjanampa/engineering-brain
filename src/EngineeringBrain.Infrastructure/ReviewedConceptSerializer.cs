@@ -194,6 +194,7 @@ public static class ReviewedConceptSerializer
                 .ToArray(),
             Review = migration.Review with
             {
+                Reviewer = KnowledgeIdentity.NormalizeLineEndings(migration.Review.Reviewer),
                 ReviewedAtUtc = migration.Review.ReviewedAtUtc.ToUniversalTime()
             }
         };

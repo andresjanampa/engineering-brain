@@ -217,4 +217,3 @@ focused tests, README, and lifecycle ADR documentation.
 Do not change `ReviewedConceptResolver` runtime behavior, retrieval, Project
 Memory ownership, graph expansion, ranking, policies, provider behavior, or any
 LLM integration.
-

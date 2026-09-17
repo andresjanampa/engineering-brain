@@ -55,6 +55,49 @@ public sealed class ReviewedConceptSerializerTests
     }
 
     [Fact]
+    public void IdentityMigrationFingerprint_NormalizesReviewerCrLfAndLoneCrToLf()
+    {
+        var migration = Migration(["concept-a"]);
+        var lf = migration with { Review = migration.Review with { Reviewer = "reviewer\nteam" } };
+        var crlf = migration with { Review = migration.Review with { Reviewer = "reviewer\r\nteam" } };
+        var cr = migration with { Review = migration.Review with { Reviewer = "reviewer\rteam" } };
+
+        var expected = ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(lf);
+
+        Assert.Equal(expected, ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(crlf));
+        Assert.Equal(expected, ReviewedConceptSerializer.CreateIdentityMigrationFingerprint(cr));
+    }
+
+    [Fact]
+    public void Serialize_NormalizesMigrationReviewerCrLfAndLoneCrToLf()
+    {
+        var migration = Migration(["concept-a"]);
+        var lf = WithFingerprint(
+            migration with { Review = migration.Review with { Reviewer = "reviewer\nteam" } });
+        var crlf = WithFingerprint(
+            migration with { Review = migration.Review with { Reviewer = "reviewer\r\nteam" } });
+        var cr = WithFingerprint(
+            migration with { Review = migration.Review with { Reviewer = "reviewer\rteam" } });
+
+        var expected = ReviewedConceptSerializer.Serialize(ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [lf]
+        });
+
+        Assert.Equal(expected, ReviewedConceptSerializer.Serialize(ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [crlf]
+        }));
+        Assert.Equal(expected, ReviewedConceptSerializer.Serialize(ReviewedConceptTestData.Catalog() with
+        {
+            SchemaVersion = 2,
+            IdentityMigrations = [cr]
+        }));
+    }
+
+    [Fact]
     public void IdentityMigrationFingerprint_ChangesForDecisionReviewerOrEvidenceChange()
     {
         var migration = Migration(["concept-a"]);
